@@ -80,7 +80,6 @@ async def _render_ui(
             reply_markup=markup,
         )
     except BadRequest as e:
-        # не плодим новые сообщения, если контент не изменился
         if "Message is not modified" in str(e):
             return
         msg = await context.bot.send_message(chat_id=chat.id, text=text, reply_markup=markup)

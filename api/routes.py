@@ -16,6 +16,7 @@ from shared.schemas import (
     IngestResponse,
     IngestTaskResponse,
     TaskStatusResponse,
+    TaskStatusesResponse,
 )
 from shared.settings import get_settings
 from shared.utils import normalize_text
@@ -131,12 +132,28 @@ def admin_ingest_batch(
 @router.get("/admin/task/{task_id}", response_model=TaskStatusResponse)
 def admin_task(task_id: str, x_admin_token: Optional[str] = Header(default=None)) -> TaskStatusResponse:
     _admin_guard(x_admin_token)
+    return _build_task_status(task_id)
+
+
+@router.get("/admin/tasks", response_model=TaskStatusesResponse)
+def admin_tasks(task_ids: str = Query(..., description="Comma-separated task IDs."), x_admin_token: Optional[str] = Header(default=None)) -> TaskStatusesResponse:
+    _admin_guard(x_admin_token)
+    ids = [normalize_text(item) for item in task_ids.split(",")]
+    ids = [item for item in ids if item]
+    if not ids:
+        raise HTTPException(status_code=400, detail="No task_ids provided")
+
+    return TaskStatusesResponse(tasks=[_build_task_status(task_id) for task_id in ids])
+
+
+def _build_task_status(task_id: str) -> TaskStatusResponse:
     res = get_result(task_id)
+    state = str(getattr(res, "state", "UNKNOWN"))
     if not res.ready():
-        return TaskStatusResponse(task_id=task_id, ready=False)
+        return TaskStatusResponse(task_id=task_id, state=state, ready=False)
     if res.successful():
-        return TaskStatusResponse(task_id=task_id, ready=True, successful=True, result=res.result)
-    return TaskStatusResponse(task_id=task_id, ready=True, successful=False, error=str(res.result))
+        return TaskStatusResponse(task_id=task_id, state=state, ready=True, successful=True, result=res.result)
+    return TaskStatusResponse(task_id=task_id, state=state, ready=True, successful=False, error=str(res.result))
 
 
 @router.post("/chat", response_model=ChatResponse)

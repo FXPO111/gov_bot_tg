@@ -110,7 +110,17 @@ curl -s -X POST "localhost:8000/admin/ingest-batch" \
   -d '{"urls":["https://zakon.rada.gov.ua/laws/show/435-15","https://zakon.rada.gov.ua/laws/show/2341-14"]}'
 ```
 
+Use `/admin/task/{task_id}` to poll one async task, or `/admin/tasks?task_ids=id1,id2` for multiple tasks at once. Responses include Celery `state` (e.g., `PENDING`, `STARTED`, `SUCCESS`, `FAILURE`).
+
+Example (multiple task IDs):
+
+```bash
+curl -s "localhost:8000/admin/tasks?task_ids=${TASK_ID_1},${TASK_ID_2}" \
+  -H "X-Admin-Token: $ADMIN_TOKEN"
+```
+
 Use `/admin/task/{task_id}` to poll async batch status.
+
 
 
 ## Useful diagnostics

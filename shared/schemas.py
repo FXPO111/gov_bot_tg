@@ -81,7 +81,12 @@ class ChatResponse(BaseModel):
 
 class TaskStatusResponse(BaseModel):
     task_id: str
+    state: str
     ready: bool
     successful: Optional[bool] = None
     result: Optional[Any] = None
     error: Optional[str] = None
+
+
+class TaskStatusesResponse(BaseModel):
+    tasks: list[TaskStatusResponse] = Field(default_factory=list)
