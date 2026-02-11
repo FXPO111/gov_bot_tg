@@ -1,4 +1,3 @@
-# bot/handlers.py
 from __future__ import annotations
 
 from telegram import Update

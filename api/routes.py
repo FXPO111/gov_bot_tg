@@ -1,4 +1,3 @@
-# api/routes.py
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -125,7 +124,6 @@ def chat(req: ChatRequest) -> ChatResponse:
             float(req.temperature),
             req.mode,
         )
-
         try:
             result = task.get(timeout=70)
         except Exception as e:

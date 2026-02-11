@@ -1,4 +1,3 @@
-# shared/llm.py
 from __future__ import annotations
 
 import json
@@ -14,7 +13,6 @@ settings = get_settings()
 
 _client: Optional[OpenAI] = None
 _CIT_RE = re.compile(r"\[(\d{1,2})\]")
-
 _NEED_MORE_RE = re.compile(r"(?im)^\s*need_more_info\s*=\s*(true|false)\s*$")
 _SOURCES_BLOCK_RE = re.compile(r"(?is)(\n|^)(#+\s*)?(джерела|источники|sources)\s*:?.*$")
 
