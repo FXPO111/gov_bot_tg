@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List
+from uuid import UUID
 
 from celery import shared_task
+from sqlalchemy import select
 
 from shared.db import get_session, init_db
 from shared.ingest import ingest_url
+from shared.llm import answer_with_citations
+from shared.models import Message
 from shared.retrieval import retrieve
 from shared.schemas import Citation
 from shared.settings import get_settings
-from shared.llm import answer_with_citations
 
 settings = get_settings()
+_CIT_RE = re.compile(r"\[(\d{1,2})\]")
 
 
 @shared_task(name="worker.tasks.init_db")
@@ -40,6 +45,61 @@ def _fmt_loc(path: str | None, heading: str | None) -> str:
     return a or b
 
 
+def _normalize_usage(raw: Any) -> dict[str, Any]:
+    if raw is None:
+        return {}
+    if hasattr(raw, "model_dump"):
+        try:
+            dumped = raw.model_dump(mode="json")
+            if isinstance(dumped, dict):
+                return dumped
+        except Exception:
+            pass
+    if hasattr(raw, "dict"):
+        try:
+            dumped = raw.dict()
+            if isinstance(dumped, dict):
+                return dumped
+        except Exception:
+            pass
+    if isinstance(raw, dict):
+        return raw
+    return {}
+
+
+def _history_for_chat(session, chat_id: str, limit: int = 16) -> list[dict[str, str]]:
+    try:
+        chat_uuid = UUID(str(chat_id))
+    except Exception:
+        return []
+
+    rows = session.execute(
+        select(Message.role, Message.content)
+        .where(Message.chat_id == chat_uuid)
+        .order_by(Message.created_at.desc())
+        .limit(limit)
+    ).all()
+
+    history = [{"role": str(role), "content": str(content)} for role, content in reversed(rows)]
+    return history
+
+
+def _extract_used_numbers(answer: str) -> list[int]:
+    nums: list[int] = []
+    for s in _CIT_RE.findall(answer or ""):
+        n = int(s)
+        if n not in nums:
+            nums.append(n)
+    return nums
+
+
+def _filter_citations(citations: list[dict[str, Any]], used: list[int]) -> list[dict[str, Any]]:
+    if not used:
+        return []
+    used_set = set(used)
+    return [c for c in citations if int(c.get("n", 0)) in used_set]
+
+
 @shared_task(name="worker.tasks.answer_question")
 def answer_question(
     user_external_id: int | None,
@@ -47,18 +107,22 @@ def answer_question(
     question: str,
     max_citations: int = 6,
     temperature: float = 0.2,
+    mode: str = "consult",
 ) -> dict[str, Any]:
     max_citations = max(1, min(int(max_citations), 10))
+    mode = mode if mode in {"brief", "consult"} else "consult"
+
     with get_session() as session:
+        history = _history_for_chat(session, chat_id=chat_id, limit=16)
         hits = retrieve(session, question, k=max_citations)
 
         if not hits:
+            base_answer = (
+                "Недостатньо релевантних джерел у базі для надійної консультації. "
+                "Будь ласка, догрузіть профільний НПА/роз'яснення за темою (URL на zakon.rada.gov.ua, kmu.gov.ua, nbu.gov.ua тощо)."
+            )
             return {
-                "answer": (
-                    "В базе нет релевантных источников под этот вопрос. "
-                    "Нужно сначала загрузить (ingest) НПА/разъяснение по теме. "
-                    "Дай ссылку на документ (ВРУ/КМУ/НБУ/суд и т.д.) — добавлю и отвечу с цитатами."
-                ),
+                "answer": base_answer,
                 "citations": [],
                 "usage": {},
             }
@@ -89,7 +153,7 @@ def answer_question(
                     unit_id=h.unit_id,
                     quote=h.text[:320] + ("…" if len(h.text) > 320 else ""),
                     score=float(h.score),
-                ).model_dump()
+                ).model_dump(mode="json")
             )
 
         joined = "\n\n".join(context_blocks)
@@ -99,19 +163,38 @@ def answer_question(
 
         citations_hint = "\n".join(citations_hint_lines)
 
-        llm_out = answer_with_citations(
-            question=question,
-            context_blocks=context_blocks,
-            citations_hint=citations_hint,
-            temperature=temperature,
-        )
+        llm_out: dict[str, Any] = {}
+        answer_text = ""
+        used_numbers: list[int] = []
 
-        text = (llm_out.get("text") or "").strip()
-        if not text:
-            text = "Не получилось сформировать ответ. Проверь источники/ключ OpenAI."
+        try:
+            llm_out = answer_with_citations(
+                question=question,
+                context_blocks=context_blocks,
+                citations_hint=citations_hint,
+                chat_history=history,
+                mode=mode,
+                temperature=temperature,
+            )
+            answer_text = (llm_out.get("answer_markdown") or "").strip()
+            used_numbers = [int(x) for x in llm_out.get("citations_used", []) if str(x).isdigit()]
+        except Exception:
+            answer_text = ""
+
+        if not answer_text:
+            preview = [f"[{c['n']}] {c['quote']}" for c in citations[:3] if c.get("quote")]
+            answer_text = (
+                "Не вдалося сформувати відповідь через LLM. Нижче — релевантні фрагменти для консультації:\n\n"
+                + "\n\n".join(preview)
+            ).strip()
+
+        if not used_numbers:
+            used_numbers = _extract_used_numbers(answer_text)
+
+        filtered = _filter_citations(citations, used_numbers)
 
         return {
-            "answer": text,
-            "citations": citations,
-            "usage": llm_out.get("usage", {}) or {},
+            "answer": answer_text,
+            "citations": filtered,
+            "usage": _normalize_usage(llm_out.get("usage") if llm_out else {}),
         }
