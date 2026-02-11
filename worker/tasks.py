@@ -40,6 +40,27 @@ def _fmt_loc(path: str | None, heading: str | None) -> str:
     return a or b
 
 
+def _normalize_usage(raw: Any) -> dict[str, Any]:
+    if raw is None:
+        return {}
+    if hasattr(raw, "model_dump"):
+        try:
+            dumped = raw.model_dump(mode="json")
+            if isinstance(dumped, dict):
+                return dumped
+        except Exception:
+            pass
+    if hasattr(raw, "dict"):
+        try:
+            dumped = raw.dict()
+            if isinstance(dumped, dict):
+                return dumped
+        except Exception:
+            pass
+    if isinstance(raw, dict):
+        return raw
+    return {}
+
 @shared_task(name="worker.tasks.answer_question")
 def answer_question(
     user_external_id: int | None,
@@ -89,7 +110,7 @@ def answer_question(
                     unit_id=h.unit_id,
                     quote=h.text[:320] + ("…" if len(h.text) > 320 else ""),
                     score=float(h.score),
-                ).model_dump()
+                ).model_dump(mode="json")
             )
 
         joined = "\n\n".join(context_blocks)
@@ -126,5 +147,6 @@ def answer_question(
         return {
             "answer": text,
             "citations": citations,
-            "usage": llm_out.get("usage", {}) if llm_out else {},
+            "usage": _normalize_usage(llm_out.get("usage") if llm_out else {}),
         }
+

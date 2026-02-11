@@ -54,6 +54,30 @@ def embed_text(text: str) -> List[float]:
     return embed_texts([text], batch_size=1)[0]
 
 
+
+def _usage_to_dict(usage: Any) -> dict[str, Any]:
+    if usage is None:
+        return {}
+    if hasattr(usage, "model_dump"):
+        try:
+            dumped = usage.model_dump(mode="json")
+            if isinstance(dumped, dict):
+                return dumped
+        except Exception:
+            pass
+    if hasattr(usage, "dict"):
+        try:
+            dumped = usage.dict()
+            if isinstance(dumped, dict):
+                return dumped
+        except Exception:
+            pass
+    if isinstance(usage, dict):
+        return usage
+    return {}
+
+
+
 @retry(
     reraise=True,
     stop=stop_after_attempt(settings.openai_max_retries),
@@ -101,6 +125,7 @@ def answer_with_citations(
 
     return {
         "text": text,
-        "usage": getattr(resp, "usage", {}) or {},
+        "usage": _usage_to_dict(getattr(resp, "usage", None)),
         "model": settings.openai_model,
     }
+
