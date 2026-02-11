@@ -237,8 +237,6 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _send_main_menu(update.message, "Поставте запитання своїми словами або скористайтесь меню нижче.")
 
 
-
-
 async def _reply_from_callback(query, text: str, reply_markup: InlineKeyboardMarkup | None = None) -> None:
     target = query.message
     if target is not None:
@@ -319,6 +317,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
 
         await query.answer(text="Дія не розпізнана. Натисніть /start", show_alert=True)
+
     except Exception:
         log.exception("Failed to handle callback: %s", data)
         try:
