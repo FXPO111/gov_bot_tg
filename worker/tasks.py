@@ -39,6 +39,38 @@ def ingest_source(url: str, title: str | None = None, meta: dict[str, Any] | Non
         }
 
 
+@shared_task(name="worker.tasks.ingest_batch_sources")
+def ingest_batch_sources(urls: list[str], title: str | None = None, meta: dict[str, Any] | None = None) -> dict[str, Any]:
+    clean_urls = [str(u).strip() for u in (urls or []) if str(u).strip().startswith("http")]
+
+    out_results: list[dict[str, Any]] = []
+    out_errors: list[dict[str, str]] = []
+
+    with get_session() as session:
+        for url in clean_urls:
+            try:
+                r = ingest_url(session, url=url, title=title, meta=meta or {})
+                out_results.append(
+                    {
+                        "url": url,
+                        "source_id": str(r.source_id),
+                        "document_id": str(r.document_id),
+                        "chunks_upserted": int(r.chunks_upserted),
+                        "changed": bool(r.changed),
+                    }
+                )
+            except Exception as exc:
+                out_errors.append({"url": url, "error": str(exc)})
+
+    return {
+        "total": len(clean_urls),
+        "succeeded": len(out_results),
+        "failed": len(out_errors),
+        "results": out_results,
+        "errors": out_errors,
+    }
+
+
 def _fmt_loc(path: str | None, heading: str | None) -> str:
     a = (heading or "").strip()
     b = (path or "").strip()
@@ -167,6 +199,9 @@ def answer_question(
             return {
                 "answer": base_answer,
                 "citations": [],
+                "need_more_info": False,
+                "questions": [],
+                "notes": [],
                 "usage": {},
             }
 
@@ -242,5 +277,8 @@ def answer_question(
         return {
             "answer": answer_text,
             "citations": filtered,
+            "need_more_info": bool(llm_out.get("need_more_info", False)) if llm_out else False,
+            "questions": [str(q).strip() for q in (llm_out.get("questions") or []) if str(q).strip()] if llm_out else [],
+            "notes": [str(n).strip() for n in (llm_out.get("notes") or []) if str(n).strip()] if llm_out else [],
             "usage": _normalize_usage(llm_out.get("usage") if llm_out else {}),
         }
