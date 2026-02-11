@@ -80,8 +80,7 @@ def _history_for_chat(session, chat_id: str, limit: int = 16) -> list[dict[str, 
         .limit(limit)
     ).all()
 
-    history = [{"role": str(role), "content": str(content)} for role, content in reversed(rows)]
-    return history
+    return [{"role": str(role), "content": str(content)} for role, content in reversed(rows)]
 
 
 def _extract_used_numbers(answer: str) -> list[int]:
@@ -119,7 +118,8 @@ def answer_question(
         if not hits:
             base_answer = (
                 "Недостатньо релевантних джерел у базі для надійної консультації. "
-                "Будь ласка, догрузіть профільний НПА/роз'яснення за темою (URL на zakon.rada.gov.ua, kmu.gov.ua, nbu.gov.ua тощо)."
+                "Будь ласка, догрузіть профільний НПА/роз'яснення за темою (URL на zakon.rada.gov.ua, kmu.gov.ua, "
+                "nbu.gov.ua тощо)."
             )
             return {
                 "answer": base_answer,
@@ -156,6 +156,7 @@ def answer_question(
                 ).model_dump(mode="json")
             )
 
+        # ограничение на общий контекст
         joined = "\n\n".join(context_blocks)
         if len(joined) > settings.max_context_chars:
             joined = joined[: settings.max_context_chars].rstrip() + "\n…"

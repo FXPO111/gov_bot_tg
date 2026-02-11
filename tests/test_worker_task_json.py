@@ -74,6 +74,7 @@ class WorkerSerializationTests(unittest.TestCase):
 
         self.assertEqual(len(result["citations"]), 1)
         self.assertEqual(result["citations"][0]["n"], 2)
+
         self.assertIsInstance(result["citations"][0]["document_id"], str)
         self.assertIsInstance(result["citations"][0]["chunk_id"], str)
         self.assertEqual(result["usage"]["total_tokens"], 19)

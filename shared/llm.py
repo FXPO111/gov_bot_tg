@@ -112,7 +112,9 @@ def _coerce_structured_payload(payload: Any, fallback_text: str) -> dict[str, An
         obj = {}
 
     answer_md = str(obj.get("answer_markdown") or fallback_text or "").strip()
-    answer_md = re.sub(r"(?is)\n?#+\s*(Источники|Джерела|Источники|Джерела)\b.*$", "", answer_md).strip()
+
+    # гарантируем, что "Источники/Джерела" не попадут в answer_markdown (их выводит внешний слой)
+    answer_md = re.sub(r"(?is)\n?#+\s*(Источники|Джерела)\b.*$", "", answer_md).strip()
     answer_md = re.sub(r"(?is)\n?(Источники|Джерела)\s*:.*$", "", answer_md).strip()
 
     raw_used = obj.get("citations_used")
@@ -187,6 +189,7 @@ def answer_with_citations(
         f"Подсказка для цитирования:\n{citations_hint}\n"
     )
 
+    # Пытаемся требовать строгую структуру JSON (если модель/SDK поддерживает)
     try:
         resp = client.responses.create(
             model=settings.openai_model,
