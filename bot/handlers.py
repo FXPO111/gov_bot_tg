@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
 
 from telegram import InlineKeyboardMarkup, Update
 from telegram.error import BadRequest
@@ -29,7 +28,6 @@ log = logging.getLogger("bot.handlers")
 
 CHAT_ID_KEY = "chat_id"
 UI_MSG_ID_KEY = "ui_msg_id"
-FSM_STATE_KEY = "fsm_state"
 LAST_CITATIONS_KEY = "last_citations"
 LAST_QUESTIONS_KEY = "last_questions"
 LAST_TOPIC_KEY = "last_topic"
@@ -49,6 +47,7 @@ def _new_question_reset(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop(LAST_CITATIONS_KEY, None)
     context.user_data.pop(LAST_QUESTIONS_KEY, None)
     context.user_data.pop(LAST_ANSWER_KEY, None)
+    context.user_data.pop(LAST_TOPIC_KEY, None)
 
 
 async def _ensure_ui_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -136,7 +135,7 @@ async def _go_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         update,
         context,
         text=f"Як правильно написати:\n\n{template_text()}",
-        markup=InlineKeyboardMarkup([*main_menu_markup().inline_keyboard]),
+        markup=main_menu_markup(),
     )
 
 
@@ -220,8 +219,10 @@ async def _analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     context.user_data[BUSY_KEY] = False
+
     if data.get("chat_id"):
         context.user_data[CHAT_ID_KEY] = str(data.get("chat_id"))
+
     context.user_data[LAST_ANSWER_KEY] = str(data.get("answer") or "")
     context.user_data[LAST_CITATIONS_KEY] = data.get("citations") or []
     questions = [str(q).strip() for q in (data.get("questions") or []) if str(q).strip()]
@@ -239,6 +240,7 @@ async def _go_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not prev:
         await _go_menu(update, context)
         return
+
     screen = prev.get("screen")
     if screen == "topic_select":
         await _go_topics(update, context)
@@ -299,8 +301,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not q:
         return
     await q.answer()
-    ns, action, param = _parse_callback(q.data or "")
-    log.info("callback ns=%s action=%s param=%s state=%s", ns, action, param, context.user_data.get(FSM_STATE_KEY))
+
+    ns, action, _param = _parse_callback(q.data or "")
+    log.info("callback ns=%s action=%s state=%s", ns, action, get_state(context.user_data))
 
     if ns == "nav":
         if action == "menu":
