@@ -40,6 +40,28 @@ def _fmt_loc(path: str | None, heading: str | None) -> str:
     return a or b
 
 
+def _normalize_usage(raw: Any) -> dict[str, Any]:
+    if raw is None:
+        return {}
+    if hasattr(raw, "model_dump"):
+        try:
+            dumped = raw.model_dump(mode="json")
+            if isinstance(dumped, dict):
+                return dumped
+        except Exception:
+            pass
+    if hasattr(raw, "dict"):
+        try:
+            dumped = raw.dict()
+            if isinstance(dumped, dict):
+                return dumped
+        except Exception:
+            pass
+    if isinstance(raw, dict):
+        return raw
+    return {}
+
+
 @shared_task(name="worker.tasks.answer_question")
 def answer_question(
     user_external_id: int | None,
@@ -89,7 +111,7 @@ def answer_question(
                     unit_id=h.unit_id,
                     quote=h.text[:320] + ("…" if len(h.text) > 320 else ""),
                     score=float(h.score),
-                ).model_dump()
+                ).model_dump(mode="json")
             )
 
         joined = "\n\n".join(context_blocks)
@@ -99,19 +121,32 @@ def answer_question(
 
         citations_hint = "\n".join(citations_hint_lines)
 
-        llm_out = answer_with_citations(
-            question=question,
-            context_blocks=context_blocks,
-            citations_hint=citations_hint,
-            temperature=temperature,
-        )
+        llm_out: dict[str, Any] = {}
+        text = ""
+        try:
+            llm_out = answer_with_citations(
+                question=question,
+                context_blocks=context_blocks,
+                citations_hint=citations_hint,
+                temperature=temperature,
+            )
+            text = (llm_out.get("text") or "").strip()
+        except Exception:
+            text = ""
 
-        text = (llm_out.get("text") or "").strip()
         if not text:
-            text = "Не получилось сформировать ответ. Проверь источники/ключ OpenAI."
+            preview = []
+            for i, c in enumerate(citations[:3], start=1):
+                quote = (c.get("quote") or "").strip()
+                if quote:
+                    preview.append(f"[{i}] {quote}")
+            text = (
+                "Не удалось обратиться к LLM, поэтому даю ответ на основе найденных фрагментов.\n\n"
+                + "\n\n".join(preview)
+            ).strip()
 
         return {
             "answer": text,
             "citations": citations,
-            "usage": llm_out.get("usage", {}) or {},
+            "usage": _normalize_usage(llm_out.get("usage") if llm_out else {}),
         }

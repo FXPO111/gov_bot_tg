@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from .settings import get_settings
 
@@ -12,8 +12,15 @@ settings = get_settings()
 _client: Optional[OpenAI] = None
 
 
+def _is_openai_enabled() -> bool:
+    key = (settings.openai_api_key or "").strip()
+    return bool(key and key.lower() not in {"changeme", "change-me", "your-openai-key"})
+
+
 def get_client() -> OpenAI:
     global _client
+    if not _is_openai_enabled():
+        raise RuntimeError("OPENAI_API_KEY is missing or placeholder. Set a valid key in .env.")
     if _client is None:
         _client = OpenAI(api_key=settings.openai_api_key, timeout=settings.openai_timeout_s)
     return _client
@@ -32,7 +39,6 @@ def embed_texts(texts: List[str], *, batch_size: int = 32) -> List[List[float]]:
     while i < len(texts):
         batch = texts[i : i + batch_size]
         resp = client.embeddings.create(model=settings.openai_embed_model, input=batch)
-        # OpenAI возвращает data в исходном порядке
         out.extend([d.embedding for d in resp.data])
         i += batch_size
     return out
@@ -45,8 +51,29 @@ def embed_texts(texts: List[str], *, batch_size: int = 32) -> List[List[float]]:
     retry=retry_if_exception_type(Exception),
 )
 def embed_text(text: str) -> List[float]:
-    # совместимость со старым кодом
     return embed_texts([text], batch_size=1)[0]
+
+
+def _usage_to_dict(usage: Any) -> dict[str, Any]:
+    if usage is None:
+        return {}
+    if hasattr(usage, "model_dump"):
+        try:
+            dumped = usage.model_dump(mode="json")
+            if isinstance(dumped, dict):
+                return dumped
+        except Exception:
+            pass
+    if hasattr(usage, "dict"):
+        try:
+            dumped = usage.dict()
+            if isinstance(dumped, dict):
+                return dumped
+        except Exception:
+            pass
+    if isinstance(usage, dict):
+        return usage
+    return {}
 
 
 @retry(
@@ -65,19 +92,17 @@ def answer_with_citations(
     client = get_client()
 
     system = (
-        "Ты юридический ассистент. Отвечай строго и по делу, как сотрудник комплаенса/юротдела. "
-        "Не фантазируй. Если данных недостаточно — прямо скажи что не хватает и что именно проверить. "
-        "Всегда используй ссылки-цитаты вида [1], [2] строго из предоставленного контекста. "
-        "Если вопрос про Украину — ориентация на законодательство Украины. "
-        "Дисклеймер: это справочная информация, не замена адвокату."
+        "Ты юридический ассистент. Отвечай строго и по делу. "
+        "Не выдумывай. Используй только факты из контекста и ссылки [1], [2]. "
+        "Если данных недостаточно — скажи об этом явно."
     )
 
     context = "\n\n".join(context_blocks).strip()
     user = (
         f"Вопрос пользователя:\n{question}\n\n"
-        f"Контекст (фрагменты источников):\n{context}\n\n"
-        f"Формат цитирования:\n{citations_hint}\n\n"
-        "Сначала дай краткий ответ (1-3 абзаца), потом 'Пояснение' пунктами, затем 'Источники' списком."
+        f"Контекст:\n{context}\n\n"
+        f"Подсказка для цитирования:\n{citations_hint}\n\n"
+        "Сначала дай краткий ответ, затем блок 'Пояснение', затем блок 'Источники'."
     )
 
     resp = client.responses.create(
@@ -98,6 +123,6 @@ def answer_with_citations(
 
     return {
         "text": text,
-        "usage": getattr(resp, "usage", {}) or {},
+        "usage": _usage_to_dict(getattr(resp, "usage", None)),
         "model": settings.openai_model,
     }
