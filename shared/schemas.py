@@ -57,6 +57,9 @@ class ChatResponse(BaseModel):
     chat_id: UUID
     answer: str
     citations: list[Citation] = Field(default_factory=list)
+    need_more_info: bool = False
+    questions: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
     usage: dict[str, Any] = Field(default_factory=dict)
 
 
