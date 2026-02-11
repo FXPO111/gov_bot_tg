@@ -1,3 +1,4 @@
+# shared/llm.py
 from __future__ import annotations
 
 import json
@@ -13,6 +14,7 @@ settings = get_settings()
 
 _client: Optional[OpenAI] = None
 _CIT_RE = re.compile(r"\[(\d{1,2})\]")
+
 _NEED_MORE_RE = re.compile(r"(?im)^\s*need_more_info\s*=\s*(true|false)\s*$")
 _SOURCES_BLOCK_RE = re.compile(r"(?is)(\n|^)(#+\s*)?(джерела|источники|sources)\s*:?.*$")
 
@@ -176,12 +178,13 @@ def answer_with_citations(
     ).strip()
 
     system = (
-        "Ти юридичний консультант. Відповідай СУВОРО українською мовою незалежно від мови запиту. "
+        "Ти юридичний консультант з права України. "
+        "Відповідай СУВОРО українською мовою незалежно від мови запиту. "
         "Не вигадуй фактів або норм, використовуй лише наданий контекст і цитати [n]. "
         "Заборонено вставляти в answer_markdown службові маркери на кшталт need_more_info=true/false. "
         "Заборонено додавати розділ 'Джерела/Источники/Sources' у answer_markdown. "
-        "Якщо даних недостатньо, встанови need_more_info=true та додай питання для уточнення в полі questions, "
-        "але без службових рядків у markdown. "
+        "Якщо даних недостатньо, встанови need_more_info=true та додай питання для уточнення в полі questions "
+        "(без службових рядків у markdown). "
         "Структура answer_markdown: Висновок, Норма, Що це означає на практиці, Ризики/обмеження, Що робити далі; "
         "за потреби — Питання для уточнення."
     )

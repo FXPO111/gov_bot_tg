@@ -1,3 +1,4 @@
+# worker/tasks.py
 from __future__ import annotations
 
 import hashlib
@@ -121,7 +122,7 @@ def _deduplicate_hits(hits: list[Any]) -> list[Any]:
     best_by_key: dict[tuple[str, str], Any] = {}
     order: list[tuple[str, str]] = []
 
-    for h in hits:
+    for h in hits or []:
         key = _dedup_key(h)
         if key not in best_by_key:
             best_by_key[key] = h
@@ -199,6 +200,7 @@ def answer_question(
                 ).model_dump(mode="json")
             )
 
+        # ограничение на общий контекст
         joined = "\n\n".join(context_blocks)
         if len(joined) > settings.max_context_chars:
             joined = joined[: settings.max_context_chars].rstrip() + "\n…"
