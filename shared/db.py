@@ -72,8 +72,6 @@ def init_db() -> None:
                 "Database initialization incomplete. Missing tables in public schema: "
                 + ", ".join(sorted(missing_tables))
                 + f". DATABASE_URL={settings.database_url}"
-            raise RuntimeError(
-                "Database initialization incomplete. Missing tables in public schema: "
-                + ", ".join(sorted(missing_tables))
             )
+
 
