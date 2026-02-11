@@ -15,11 +15,10 @@ class IngestRequest(BaseModel):
     title: Optional[str] = None
     meta: dict[str, Any] = Field(default_factory=dict)
 
-class IngestTaskResponse(BaseModel):
-    task_id: str
 
 class IngestTaskResponse(BaseModel):
     task_id: str
+
 
 class IngestResponse(BaseModel):
     source_id: UUID

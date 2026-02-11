@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any, Optional
-from uuid import UUID
 
 from fastapi import APIRouter, Header, HTTPException, Query
 
@@ -16,7 +15,6 @@ from shared.schemas import (
     IngestTaskResponse,
     TaskStatusResponse,
 )
-
 from shared.settings import get_settings
 from shared.utils import normalize_text
 
@@ -43,7 +41,6 @@ def admin_init_db(x_admin_token: Optional[str] = Header(default=None)) -> dict[s
         init_db()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"init-db failed: {exc}")
-    init_db()
     return {"ok": True}
 
 
@@ -60,9 +57,8 @@ def admin_ingest(
         raise HTTPException(status_code=400, detail="Invalid URL")
 
     if sync:
-
-        from shared.ingest import ingest_url  # локальный импорт
-        from shared.ingest import ingest_url  # локальный импорт, чтобы не тянуть зависимости на импорт модуля
+        # локальный импорт, чтобы не тянуть ingest-зависимости при импорте роутера
+        from shared.ingest import ingest_url
 
         with get_session() as session:
             r = ingest_url(session, url=url, title=req.title, meta=req.meta)
