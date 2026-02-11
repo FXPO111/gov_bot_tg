@@ -237,14 +237,13 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _send_main_menu(update.message, "Поставте запитання своїми словами або скористайтесь меню нижче.")
 
 
-
-
 async def _reply_from_callback(query, text: str, reply_markup: InlineKeyboardMarkup | None = None) -> None:
     target = query.message
     if target is None:
         await query.answer(text="Не вдалося відправити повідомлення. Спробуйте /start", show_alert=True)
         return
 
+    # Спробувати “не спамити”: редагуємо те саме повідомлення, якщо можливо
     try:
         await target.edit_text(text, reply_markup=reply_markup)
         return
@@ -327,7 +326,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 await _reply_from_callback(query, "Уточнення для останньої відповіді відсутні.")
             return
 
-        await query.answer(text="Дія не розпізнана. Натисніть /start", show_alert=True)
+        await _reply_from_callback(query, "Дія не розпізнана. Натисніть /start")
+
     except Exception:
         log.exception("Failed to handle callback: %s", data)
         try:
