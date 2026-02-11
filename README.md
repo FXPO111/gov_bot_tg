@@ -98,6 +98,21 @@ The DB now stores additional consultation telemetry:
 - `conversation_turns` — question/answer snapshots with `need_more_info` + clarification questions count
 - `audit_logs` — lightweight API events for diagnostics
 
+
+### Batch ingest (for scaling the DB)
+
+You can enqueue multiple URLs in one call:
+
+```bash
+curl -s -X POST "localhost:8000/admin/ingest-batch" \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -d '{"urls":["https://zakon.rada.gov.ua/laws/show/435-15","https://zakon.rada.gov.ua/laws/show/2341-14"]}'
+```
+
+Use `/admin/task/{task_id}` to poll async batch status.
+
+
 ## Useful diagnostics
 
 ```bash

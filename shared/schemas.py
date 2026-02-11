@@ -27,6 +27,22 @@ class IngestResponse(BaseModel):
     changed: bool
 
 
+class IngestBatchRequest(BaseModel):
+    urls: list[str] = Field(default_factory=list, description="List of URLs to ingest.")
+    title: Optional[str] = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class IngestBatchResponse(BaseModel):
+    total: int
+    queued: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    task_id: Optional[str] = None
+    results: list[IngestResponse] = Field(default_factory=list)
+    errors: list[dict[str, str]] = Field(default_factory=list)
+
+
 class Citation(BaseModel):
     n: int
     document_id: UUID

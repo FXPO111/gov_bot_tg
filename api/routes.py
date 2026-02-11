@@ -10,6 +10,8 @@ from shared.schemas import (
     ChatRequest,
     ChatResponse,
     HealthResponse,
+    IngestBatchRequest,
+    IngestBatchResponse,
     IngestRequest,
     IngestResponse,
     IngestTaskResponse,
@@ -71,6 +73,59 @@ def admin_ingest(
 
     task = send_task("worker.tasks.ingest_source", url, req.title, req.meta)
     return IngestTaskResponse(task_id=str(task.id))
+
+
+@router.post("/admin/ingest-batch", response_model=IngestBatchResponse)
+def admin_ingest_batch(
+    req: IngestBatchRequest,
+    sync: bool = Query(default=False, description="If true, ingest in-process (no Celery)."),
+    x_admin_token: Optional[str] = Header(default=None),
+) -> IngestBatchResponse:
+    _admin_guard(x_admin_token)
+
+    urls = []
+    for raw in req.urls:
+        url = normalize_text(raw)
+        if url.startswith("http"):
+            urls.append(url)
+
+    # сохраняем порядок и убираем дубли
+    urls = list(dict.fromkeys(urls))
+
+    if not urls:
+        raise HTTPException(status_code=400, detail="No valid URLs provided")
+
+    if sync:
+        from shared.ingest import ingest_url
+
+        results: list[IngestResponse] = []
+        errors: list[dict[str, str]] = []
+
+        with get_session() as session:
+            for url in urls:
+                try:
+                    r = ingest_url(session, url=url, title=req.title, meta=req.meta)
+                    results.append(
+                        IngestResponse(
+                            source_id=r.source_id,
+                            document_id=r.document_id,
+                            chunks_upserted=r.chunks_upserted,
+                            changed=r.changed,
+                        )
+                    )
+                except Exception as exc:
+                    errors.append({"url": url, "error": str(exc)})
+
+        return IngestBatchResponse(
+            total=len(urls),
+            succeeded=len(results),
+            failed=len(errors),
+            results=results,
+            errors=errors,
+        )
+
+    task = send_task("worker.tasks.ingest_batch_sources", urls, req.title, req.meta)
+    return IngestBatchResponse(total=len(urls), queued=len(urls), task_id=str(task.id))
 
 
 @router.get("/admin/task/{task_id}", response_model=TaskStatusResponse)
