@@ -4,10 +4,10 @@ import logging
 import time
 
 from telegram.ext import ApplicationBuilder
-from telegram.ext import CommandHandler, MessageHandler, filters
+from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from shared.settings import get_settings
-from .handlers import cmd_help, cmd_newchat, cmd_start, on_text
+from .handlers import cmd_help, cmd_newchat, cmd_start, on_callback, on_text
 
 settings = get_settings()
 
@@ -31,6 +31,7 @@ def main() -> None:
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("newchat", cmd_newchat))
+    app.add_handler(CallbackQueryHandler(on_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 
     app.run_polling(close_loop=False)
