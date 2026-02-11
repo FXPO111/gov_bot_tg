@@ -674,10 +674,16 @@ def _store_document_and_chunks(
         segments = [Segment(text=content_text, unit_type="chunk", unit_id="0")]
 
     chunk_texts = [s.text for s in segments]
-    embeddings = llm.embed_texts(chunk_texts, batch_size=32)
+    embeddings: list[list[float] | None]
+    try:
+        embeddings_raw = llm.embed_texts(chunk_texts, batch_size=32)
+        embeddings = [list(v) for v in embeddings_raw]
+    except Exception:
+        embeddings = [None] * len(segments)
 
     upserted = 0
-    for idx, (seg, vec) in enumerate(zip(segments, embeddings)):
+    for idx, seg in enumerate(segments):
+        vec = embeddings[idx] if idx < len(embeddings) else None
         session.add(
             Chunk(
                 document_id=doc.id,
