@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
@@ -9,7 +8,6 @@ from pydantic import BaseModel, Field
 
 class HealthResponse(BaseModel):
     status: str = "ok"
-    time_utc: datetime
 
 
 class IngestRequest(BaseModel):
@@ -50,6 +48,7 @@ class ChatRequest(BaseModel):
 
     max_citations: int = 6
     temperature: float = 0.2
+    mode: str = "consult"  # brief|consult
 
 
 class ChatResponse(BaseModel):
