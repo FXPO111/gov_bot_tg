@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Optional
 
-from telegram import InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from .api_client import APIClient
 from .ui_nav import get_state, pop_screen, push_screen, reset_stack, set_state
 from .ui_screens import (
+    TG_MSG_LIMIT,
     TOPIC_HINTS,
     answer_markup,
     case_markup,
@@ -50,6 +52,97 @@ def _new_question_reset(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop(LAST_TOPIC_KEY, None)
 
 
+def _help_text() -> str:
+    return (
+        "Як користуватись ботом:\n"
+        "1) Натисніть «🆕 Нове питання» або «📌 Обрати тему».\n"
+        "2) Опишіть ситуацію простими словами.\n"
+        "3) Після відповіді відкрийте «📚 Джерела» або «🧩 Уточнити».\n\n"
+        "Команди: /menu, /back, /cancel, /start"
+    )
+
+
+def _split_for_tg(text: str, limit: int = TG_MSG_LIMIT) -> list[str]:
+    clean = (text or "").strip()
+    if not clean:
+        return []
+    if len(clean) <= limit:
+        return [clean]
+
+    parts: list[str] = []
+
+    # 1) режем по абзацам, чтобы не рвать смысл
+    for block in clean.split("\n\n"):
+        block = block.strip()
+        if not block:
+            continue
+
+        if len(block) <= limit:
+            if not parts or (len(parts[-1]) + 2 + len(block) > limit):
+                parts.append(block)
+            else:
+                parts[-1] += f"\n\n{block}"
+            continue
+
+        # 2) если абзац слишком длинный — режем его по лимиту
+        start = 0
+        while start < len(block):
+            parts.append(block[start : start + limit])
+            start += limit
+
+    return parts
+
+
+def _actions_markup(*, has_citations: bool, has_questions: bool) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
+        [
+            InlineKeyboardButton("📋 Меню", callback_data="nav:menu"),
+            InlineKeyboardButton("❓ Help", callback_data="main:help"),
+        ],
+        [
+            InlineKeyboardButton("🆕 Нове питання", callback_data="main:newq"),
+            InlineKeyboardButton("📌 Обрати тему", callback_data="main:topics"),
+        ],
+    ]
+    if has_citations:
+        rows.append([InlineKeyboardButton("📚 Джерела", callback_data="ans:sources")])
+    if has_questions:
+        rows.append([InlineKeyboardButton("🧩 Уточнити", callback_data="ans:clarify")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def _send_reply(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    text: str,
+    *,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    reply_to: bool = True,
+) -> None:
+    chat = update.effective_chat
+    if chat is None:
+        return
+
+    reply_to_message_id: Optional[int] = None
+    if reply_to:
+        if update.message:
+            reply_to_message_id = update.message.message_id
+        elif update.callback_query and update.callback_query.message:
+            reply_to_message_id = update.callback_query.message.message_id
+
+    chunks = _split_for_tg(text)
+    if not chunks:
+        return
+
+    for idx, chunk in enumerate(chunks):
+        await context.bot.send_message(
+            chat_id=chat.id,
+            text=chunk,
+            reply_to_message_id=reply_to_message_id if idx == 0 else None,
+            reply_markup=reply_markup if idx == len(chunks) - 1 else None,
+        )
+
+
 async def _ensure_ui_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if context.user_data.get(UI_MSG_ID_KEY):
         return
@@ -80,6 +173,7 @@ async def _render_ui(
             reply_markup=markup,
         )
     except BadRequest as e:
+        # не плодим новые сообщения, если контент не изменился
         if "Message is not modified" in str(e):
             return
         msg = await context.bot.send_message(chat_id=chat.id, text=text, reply_markup=markup)
@@ -156,6 +250,7 @@ async def _go_sources_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def _go_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # UI-экран можно оставить (если хочешь), но реальный ответ отправляем отдельными сообщениями в _analyze()
     set_state(context.user_data, "answer_ready")
     answer = trim_answer(str(context.user_data.get(LAST_ANSWER_KEY) or "Порожня відповідь."))
     citations = context.user_data.get(LAST_CITATIONS_KEY) or []
@@ -218,7 +313,18 @@ async def _analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as exc:
         log.exception("Analyze failed")
         context.user_data[BUSY_KEY] = False
-        await _render_ui(update, context, text=f"Помилка API: {exc}", markup=case_markup(has_draft=True))
+        await _send_reply(
+            update,
+            context,
+            f"Помилка API: {exc}",
+            reply_markup=_actions_markup(has_citations=False, has_questions=False),
+        )
+        await _render_ui(
+            update,
+            context,
+            text="Введіть кейс повторно або натисніть «Нове питання».",
+            markup=case_markup(has_draft=True),
+        )
         set_state(context.user_data, "awaiting_case")
         return
 
@@ -227,16 +333,38 @@ async def _analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if data.get("chat_id"):
         context.user_data[CHAT_ID_KEY] = str(data.get("chat_id"))
 
-    context.user_data[LAST_ANSWER_KEY] = str(data.get("answer") or "")
-    context.user_data[LAST_CITATIONS_KEY] = data.get("citations") or []
+    answer_text = str(data.get("answer") or "").strip()
+    citations = data.get("citations") or []
     questions = [str(q).strip() for q in (data.get("questions") or []) if str(q).strip()]
+    need_more_info = bool(data.get("need_more_info", False))
+
+    context.user_data[LAST_ANSWER_KEY] = answer_text
+    context.user_data[LAST_CITATIONS_KEY] = citations
     context.user_data[LAST_QUESTIONS_KEY] = questions
 
-    if bool(data.get("need_more_info", False)) and questions:
+    # 1) ответ отдельным сообщением
+    await _send_reply(
+        update,
+        context,
+        answer_text or "Порожня відповідь.",
+        reply_markup=_actions_markup(has_citations=bool(citations), has_questions=bool(questions)),
+    )
+
+    # 2) если нужно уточнение — отдельным сообщением
+    if need_more_info and questions:
+        await _send_reply(
+            update,
+            context,
+            "Щоб відповісти точно, уточніть, будь ласка:\n"
+            + (format_questions(questions) or "• Додайте більше деталей."),
+            reply_markup=_actions_markup(has_citations=bool(citations), has_questions=True),
+        )
         await _go_need_more_info(update, context)
         return
 
-    await _go_answer(update, context)
+    # UI возвращаем на ввод кейса (чтобы юзер мог продолжать)
+    await _go_case_input(update, context)
+    set_state(context.user_data, "answer_ready")
 
 
 async def _go_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -283,7 +411,13 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _go_menu(update, context)
+    await _send_reply(
+        update,
+        context,
+        _help_text(),
+        reply_markup=_actions_markup(has_citations=False, has_questions=False),
+        reply_to=bool(update.message),
+    )
 
 
 async def cmd_newchat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -319,7 +453,15 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     if ns == "main":
-        if action == "template":
+        if action == "help":
+            await _send_reply(
+                update,
+                context,
+                _help_text(),
+                reply_markup=_actions_markup(has_citations=False, has_questions=False),
+                reply_to=False,
+            )
+        elif action == "template":
             await _go_template(update, context)
         elif action == "topics":
             await _go_topics(update, context)
@@ -353,8 +495,30 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     if ns == "ans":
         if action == "sources":
+            src = format_sources(context.user_data.get(LAST_CITATIONS_KEY) or [])
+            await _send_reply(
+                update,
+                context,
+                f"Джерела:\n\n{src}",
+                reply_markup=_actions_markup(
+                    has_citations=bool(context.user_data.get(LAST_CITATIONS_KEY)),
+                    has_questions=bool(context.user_data.get(LAST_QUESTIONS_KEY)),
+                ),
+                reply_to=False,
+            )
             await _go_sources(update, context)
         elif action == "clarify":
+            q_text = format_questions(context.user_data.get(LAST_QUESTIONS_KEY) or [])
+            await _send_reply(
+                update,
+                context,
+                "Щоб відповісти точно, уточніть, будь ласка:\n" + (q_text or "• Додайте більше деталей."),
+                reply_markup=_actions_markup(
+                    has_citations=bool(context.user_data.get(LAST_CITATIONS_KEY)),
+                    has_questions=bool(context.user_data.get(LAST_QUESTIONS_KEY)),
+                ),
+                reply_to=False,
+            )
             await _go_need_more_info(update, context)
         elif action == "back":
             await _go_answer(update, context)
@@ -373,12 +537,13 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     state = get_state(context.user_data)
     if state not in {"awaiting_case", "need_more_info"}:
-        await _render_ui(
+        await _send_reply(
             update,
             context,
-            text="Зараз ви в меню. Натисніть «🆕 Нове питання» або «📌 Обрати тему».",
-            markup=main_menu_markup(),
+            "Зараз ви в меню. Натисніть «🆕 Нове питання» або «📌 Обрати тему».",
+            reply_markup=_actions_markup(has_citations=False, has_questions=False),
         )
+        await _go_menu(update, context)
         return
 
     prev = str(context.user_data.get(DRAFT_CASE_KEY) or "").strip()

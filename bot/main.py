@@ -4,7 +4,13 @@ import logging
 import time
 
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
+from telegram.ext import (
+    ApplicationBuilder,
+    CallbackQueryHandler,
+    CommandHandler,
+    MessageHandler,
+    filters,
+)
 
 from shared.settings import get_settings
 from .handlers import (
