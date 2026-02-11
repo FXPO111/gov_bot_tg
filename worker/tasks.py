@@ -99,19 +99,32 @@ def answer_question(
 
         citations_hint = "\n".join(citations_hint_lines)
 
-        llm_out = answer_with_citations(
-            question=question,
-            context_blocks=context_blocks,
-            citations_hint=citations_hint,
-            temperature=temperature,
-        )
+        llm_out: dict[str, Any] = {}
+        text = ""
+        try:
+            llm_out = answer_with_citations(
+                question=question,
+                context_blocks=context_blocks,
+                citations_hint=citations_hint,
+                temperature=temperature,
+            )
+            text = (llm_out.get("text") or "").strip()
+        except Exception:
+            text = ""
 
-        text = (llm_out.get("text") or "").strip()
         if not text:
-            text = "Не получилось сформировать ответ. Проверь источники/ключ OpenAI."
+            preview = []
+            for i, c in enumerate(citations[:3], start=1):
+                quote = (c.get("quote") or "").strip()
+                if quote:
+                    preview.append(f"[{i}] {quote}")
+            text = (
+                "Не удалось обратиться к LLM, поэтому даю ответ на основе найденных фрагментов.\n\n"
+                + "\n\n".join(preview)
+            ).strip()
 
         return {
             "answer": text,
             "citations": citations,
-            "usage": llm_out.get("usage", {}) or {},
+            "usage": llm_out.get("usage", {}) if llm_out else {},
         }
