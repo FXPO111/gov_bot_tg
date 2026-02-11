@@ -112,6 +112,7 @@ curl -s -X POST "localhost:8000/admin/ingest-batch" \
 
 Use `/admin/task/{task_id}` to poll async batch status.
 
+
 ## Useful diagnostics
 
 ```bash
