@@ -120,6 +120,8 @@ curl -s "localhost:8000/admin/tasks?task_ids=${TASK_ID_1},${TASK_ID_2}" \
 ```
 
 
+Use `/admin/task/{task_id}` to poll async batch status.
+
 ## Useful diagnostics
 
 ```bash

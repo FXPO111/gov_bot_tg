@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import BadRequest
@@ -30,7 +29,6 @@ log = logging.getLogger("bot.handlers")
 
 CHAT_ID_KEY = "chat_id"
 UI_MSG_ID_KEY = "ui_msg_id"
-FSM_STATE_KEY = "fsm_state"
 LAST_CITATIONS_KEY = "last_citations"
 LAST_QUESTIONS_KEY = "last_questions"
 LAST_TOPIC_KEY = "last_topic"
@@ -50,6 +48,7 @@ def _new_question_reset(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop(LAST_CITATIONS_KEY, None)
     context.user_data.pop(LAST_QUESTIONS_KEY, None)
     context.user_data.pop(LAST_ANSWER_KEY, None)
+    context.user_data.pop(LAST_TOPIC_KEY, None)
 
 
 def _help_text() -> str:
@@ -57,7 +56,7 @@ def _help_text() -> str:
         "Як користуватись ботом:\n"
         "1) Натисніть «🆕 Нове питання» або «📌 Обрати тему».\n"
         "2) Опишіть ситуацію простими словами.\n"
-        "3) Після відповіді відкрийте «📚 Джерела» або «🔁 Уточнити».\n\n"
+        "3) Після відповіді відкрийте «📚 Джерела» або «🧩 Уточнити».\n\n"
         "Команди: /menu, /back, /cancel, /start"
     )
 
@@ -70,17 +69,21 @@ def _split_for_tg(text: str, limit: int = TG_MSG_LIMIT) -> list[str]:
         return [clean]
 
     parts: list[str] = []
+
+    # 1) режем по абзацам, чтобы не рвать смысл
     for block in clean.split("\n\n"):
         block = block.strip()
         if not block:
             continue
+
         if len(block) <= limit:
-            if not parts or len(parts[-1]) + 2 + len(block) > limit:
+            if not parts or (len(parts[-1]) + 2 + len(block) > limit):
                 parts.append(block)
             else:
                 parts[-1] += f"\n\n{block}"
             continue
 
+        # 2) если абзац слишком длинный — режем его по лимиту
         start = 0
         while start < len(block):
             parts.append(block[start : start + limit])
@@ -89,14 +92,16 @@ def _split_for_tg(text: str, limit: int = TG_MSG_LIMIT) -> list[str]:
     return parts
 
 
-def _actions_markup(has_citations: bool, has_questions: bool) -> InlineKeyboardMarkup:
-    rows = [
+def _actions_markup(*, has_citations: bool, has_questions: bool) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
         [
             InlineKeyboardButton("📋 Меню", callback_data="nav:menu"),
             InlineKeyboardButton("❓ Help", callback_data="main:help"),
         ],
-        [InlineKeyboardButton("🆕 Нове питання", callback_data="main:newq")],
-        [InlineKeyboardButton("📌 Обрати тему", callback_data="main:topics")],
+        [
+            InlineKeyboardButton("🆕 Нове питання", callback_data="main:newq"),
+            InlineKeyboardButton("📌 Обрати тему", callback_data="main:topics"),
+        ],
     ]
     if has_citations:
         rows.append([InlineKeyboardButton("📚 Джерела", callback_data="ans:sources")])
@@ -109,8 +114,8 @@ async def _send_reply(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     text: str,
-    reply_markup: InlineKeyboardMarkup | None = None,
     *,
+    reply_markup: InlineKeyboardMarkup | None = None,
     reply_to: bool = True,
 ) -> None:
     chat = update.effective_chat
@@ -173,7 +178,7 @@ async def _render_ui(
     context: ContextTypes.DEFAULT_TYPE,
     *,
     text: str,
-    markup: InlineKeyboardMarkup,
+    markup: InlineKeyboardMarkup | None,
 ) -> None:
     await _ensure_ui_message(update, context)
     chat = update.effective_chat
@@ -188,7 +193,10 @@ async def _render_ui(
             text=text,
             reply_markup=markup,
         )
-    except BadRequest:
+    except BadRequest as e:
+        # не плодим новые сообщения, если контент не изменился
+        if "Message is not modified" in str(e):
+            return
         msg = await context.bot.send_message(chat_id=chat.id, text=text, reply_markup=markup)
         context.user_data[UI_MSG_ID_KEY] = msg.message_id
 
@@ -244,7 +252,7 @@ async def _go_template(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         update,
         context,
         text=f"Як правильно написати:\n\n{template_text()}",
-        markup=InlineKeyboardMarkup([*main_menu_markup().inline_keyboard]),
+        markup=main_menu_markup(),
     )
 
 
@@ -300,7 +308,9 @@ async def _analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             update,
             context,
             text="Вже виконується аналіз. Зачекайте кілька секунд.",
-            markup=need_more_markup() if get_state(context.user_data) == "need_more_info" else case_markup(True),
+            markup=need_more_markup()
+            if get_state(context.user_data) == "need_more_info"
+            else case_markup(has_draft=True),
         )
         return
 
@@ -311,7 +321,7 @@ async def _analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     set_state(context.user_data, "analyzing")
     context.user_data[BUSY_KEY] = True
-    await _render_ui(update, context, text="⏳ Аналізую…", markup=InlineKeyboardMarkup([]))
+    await _render_ui(update, context, text="⏳ Аналізую…", markup=None)
 
     try:
         data = await asyncio.to_thread(
@@ -329,35 +339,50 @@ async def _analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"Помилка API: {exc}",
             reply_markup=_actions_markup(has_citations=False, has_questions=False),
         )
-        await _render_ui(update, context, text="Введіть кейс повторно або натисніть «Нове питання».", markup=case_markup(True))
+        await _render_ui(
+            update,
+            context,
+            text="Введіть кейс повторно або натисніть «Нове питання».",
+            markup=case_markup(has_draft=True),
+        )
         set_state(context.user_data, "awaiting_case")
         return
 
     context.user_data[BUSY_KEY] = False
+
     if data.get("chat_id"):
         context.user_data[CHAT_ID_KEY] = str(data.get("chat_id"))
-    context.user_data[LAST_ANSWER_KEY] = str(data.get("answer") or "")
-    context.user_data[LAST_CITATIONS_KEY] = data.get("citations") or []
+
+    answer_text = str(data.get("answer") or "").strip()
+    citations = data.get("citations") or []
     questions = [str(q).strip() for q in (data.get("questions") or []) if str(q).strip()]
+    need_more_info = bool(data.get("need_more_info", False))
+
+    context.user_data[LAST_ANSWER_KEY] = answer_text
+    context.user_data[LAST_CITATIONS_KEY] = citations
     context.user_data[LAST_QUESTIONS_KEY] = questions
 
+    # 1) ответ отдельным сообщением
     await _send_reply(
         update,
         context,
-        str(data.get("answer") or ""),
-        reply_markup=_actions_markup(has_citations=bool(context.user_data[LAST_CITATIONS_KEY]), has_questions=bool(questions)),
+        answer_text or "Порожня відповідь.",
+        reply_markup=_actions_markup(has_citations=bool(citations), has_questions=bool(questions)),
     )
 
-    if bool(data.get("need_more_info", False)) and questions:
+    # 2) если нужно уточнение — отдельным сообщением
+    if need_more_info and questions:
         await _send_reply(
             update,
             context,
-            "Щоб відповісти точно, уточніть, будь ласка:\n" + (format_questions(questions) or "• Додайте більше деталей."),
-            reply_markup=_actions_markup(has_citations=bool(context.user_data[LAST_CITATIONS_KEY]), has_questions=True),
+            "Щоб відповісти точно, уточніть, будь ласка:\n"
+            + (format_questions(questions) or "• Додайте більше деталей."),
+            reply_markup=_actions_markup(has_citations=bool(citations), has_questions=True),
         )
         await _go_need_more_info(update, context)
         return
 
+    # UI возвращаем на ввод кейса (чтобы юзер мог продолжать)
     await _go_case_input(update, context)
     set_state(context.user_data, "answer_ready")
 
@@ -367,6 +392,7 @@ async def _go_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not prev:
         await _go_menu(update, context)
         return
+
     screen = prev.get("screen")
     if screen == "topic_select":
         await _go_topics(update, context)
@@ -405,7 +431,13 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _send_reply(update, context, _help_text(), reply_markup=_actions_markup(False, False), reply_to=bool(update.message))
+    await _send_reply(
+        update,
+        context,
+        _help_text(),
+        reply_markup=_actions_markup(has_citations=False, has_questions=False),
+        reply_to=bool(update.message),
+    )
 
 
 async def cmd_newchat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -427,8 +459,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if not q:
         return
     await q.answer()
-    ns, action, param = _parse_callback(q.data or "")
-    log.info("callback ns=%s action=%s param=%s state=%s", ns, action, param, context.user_data.get(FSM_STATE_KEY))
+
+    ns, action, _param = _parse_callback(q.data or "")
+    log.info("callback ns=%s action=%s state=%s", ns, action, get_state(context.user_data))
 
     if ns == "nav":
         if action == "menu":
@@ -440,10 +473,14 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     if ns == "main":
-        if action == "menu":
-            await _go_menu(update, context)
-        elif action == "help":
-            await _send_reply(update, context, _help_text(), reply_markup=_actions_markup(False, False), reply_to=False)
+        if action == "help":
+            await _send_reply(
+                update,
+                context,
+                _help_text(),
+                reply_markup=_actions_markup(has_citations=False, has_questions=False),
+                reply_to=False,
+            )
         elif action == "template":
             await _go_template(update, context)
         elif action == "topics":
@@ -483,7 +520,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 update,
                 context,
                 f"Джерела:\n\n{src}",
-                reply_markup=_actions_markup(has_citations=bool(context.user_data.get(LAST_CITATIONS_KEY)), has_questions=bool(context.user_data.get(LAST_QUESTIONS_KEY))),
+                reply_markup=_actions_markup(
+                    has_citations=bool(context.user_data.get(LAST_CITATIONS_KEY)),
+                    has_questions=bool(context.user_data.get(LAST_QUESTIONS_KEY)),
+                ),
                 reply_to=False,
             )
             await _go_sources(update, context)
@@ -493,7 +533,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 update,
                 context,
                 "Щоб відповісти точно, уточніть, будь ласка:\n" + (q_text or "• Додайте більше деталей."),
-                reply_markup=_actions_markup(has_citations=bool(context.user_data.get(LAST_CITATIONS_KEY)), has_questions=bool(context.user_data.get(LAST_QUESTIONS_KEY))),
+                reply_markup=_actions_markup(
+                    has_citations=bool(context.user_data.get(LAST_CITATIONS_KEY)),
+                    has_questions=bool(context.user_data.get(LAST_QUESTIONS_KEY)),
+                ),
                 reply_to=False,
             )
             await _go_need_more_info(update, context)
@@ -518,7 +561,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             update,
             context,
             "Зараз ви в меню. Натисніть «🆕 Нове питання» або «📌 Обрати тему».",
-            reply_markup=_actions_markup(False, False),
+            reply_markup=_actions_markup(has_citations=False, has_questions=False),
         )
         await _go_menu(update, context)
         return

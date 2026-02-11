@@ -248,6 +248,7 @@ def chat(req: ChatRequest) -> ChatResponse:
         )
 
 
+
 @router.post("/billing/webhook")
 def billing_webhook(payload: dict[str, Any]) -> dict[str, Any]:
     # заглушка под оплату
