@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -349,7 +350,8 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = context.user_data.get(CHAT_ID_KEY)
 
     try:
-        data = api.chat(
+        data = await asyncio.to_thread(
+            api.chat,
             msg,
             user_external_id=update.effective_user.id if update.effective_user else None,
             chat_id=chat_id,
