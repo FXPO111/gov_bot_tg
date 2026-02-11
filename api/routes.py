@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Any, Optional
-from uuid import UUID
 
 from fastapi import APIRouter, Header, HTTPException, Query
 
@@ -16,7 +15,6 @@ from shared.schemas import (
     IngestTaskResponse,
     TaskStatusResponse,
 )
-
 from shared.settings import get_settings
 from shared.utils import normalize_text
 
@@ -59,7 +57,8 @@ def admin_ingest(
         raise HTTPException(status_code=400, detail="Invalid URL")
 
     if sync:
-        from shared.ingest import ingest_url  # локальный импорт
+        # локальный импорт, чтобы не тянуть ingest-зависимости при импорте роутера
+        from shared.ingest import ingest_url
 
         with get_session() as session:
             r = ingest_url(session, url=url, title=req.title, meta=req.meta)
