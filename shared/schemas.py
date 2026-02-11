@@ -18,6 +18,9 @@ class IngestRequest(BaseModel):
 class IngestTaskResponse(BaseModel):
     task_id: str
 
+class IngestTaskResponse(BaseModel):
+    task_id: str
+
 class IngestResponse(BaseModel):
     source_id: UUID
     document_id: UUID
