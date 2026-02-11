@@ -12,7 +12,7 @@ from .settings import get_settings
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-REQUIRED_TABLES = {"users", "chats", "messages", "sources", "documents", "chunks"}
+REQUIRED_TABLES = {"users", "chats", "messages", "conversation_turns", "audit_logs", "sources", "documents", "chunks"}
 
 engine = create_engine(
     settings.database_url,

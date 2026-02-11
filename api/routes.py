@@ -5,11 +5,13 @@ from typing import Any, Optional
 from fastapi import APIRouter, Header, HTTPException, Query
 
 from shared.db import get_session, init_db
-from shared.models import Chat, Message, User
+from shared.models import AuditLog, Chat, ConversationTurn, Message, User
 from shared.schemas import (
     ChatRequest,
     ChatResponse,
     HealthResponse,
+    IngestBatchRequest,
+    IngestBatchResponse,
     IngestRequest,
     IngestResponse,
     IngestTaskResponse,
@@ -73,6 +75,59 @@ def admin_ingest(
     return IngestTaskResponse(task_id=str(task.id))
 
 
+@router.post("/admin/ingest-batch", response_model=IngestBatchResponse)
+def admin_ingest_batch(
+    req: IngestBatchRequest,
+    sync: bool = Query(default=False, description="If true, ingest in-process (no Celery)."),
+    x_admin_token: Optional[str] = Header(default=None),
+) -> IngestBatchResponse:
+    _admin_guard(x_admin_token)
+
+    urls = []
+    for raw in req.urls:
+        url = normalize_text(raw)
+        if url.startswith("http"):
+            urls.append(url)
+
+    # сохраняем порядок и убираем дубли
+    urls = list(dict.fromkeys(urls))
+
+    if not urls:
+        raise HTTPException(status_code=400, detail="No valid URLs provided")
+
+    if sync:
+        from shared.ingest import ingest_url
+
+        results: list[IngestResponse] = []
+        errors: list[dict[str, str]] = []
+
+        with get_session() as session:
+            for url in urls:
+                try:
+                    r = ingest_url(session, url=url, title=req.title, meta=req.meta)
+                    results.append(
+                        IngestResponse(
+                            source_id=r.source_id,
+                            document_id=r.document_id,
+                            chunks_upserted=r.chunks_upserted,
+                            changed=r.changed,
+                        )
+                    )
+                except Exception as exc:
+                    errors.append({"url": url, "error": str(exc)})
+
+        return IngestBatchResponse(
+            total=len(urls),
+            succeeded=len(results),
+            failed=len(errors),
+            results=results,
+            errors=errors,
+        )
+
+    task = send_task("worker.tasks.ingest_batch_sources", urls, req.title, req.meta)
+    return IngestBatchResponse(total=len(urls), queued=len(urls), task_id=str(task.id))
+
+
 @router.get("/admin/task/{task_id}", response_model=TaskStatusResponse)
 def admin_task(task_id: str, x_admin_token: Optional[str] = Header(default=None)) -> TaskStatusResponse:
     _admin_guard(x_admin_token)
@@ -133,12 +188,45 @@ def chat(req: ChatRequest) -> ChatResponse:
 
         answer_text = (result.get("answer") or "").strip()
         session.add(Message(chat_id=chat_obj.id, role="assistant", content=answer_text))
+
+        questions = [str(q).strip() for q in (result.get("questions") or []) if str(q).strip()]
+        need_more_info = bool(result.get("need_more_info", False))
+        citations = result.get("citations", [])
+
+        session.add(
+            ConversationTurn(
+                chat_id=chat_obj.id,
+                user_id=user.id,
+                question=question,
+                answer=answer_text,
+                need_more_info=need_more_info,
+                questions_json=questions,
+                citations_count=len(citations),
+            )
+        )
+        session.add(
+            AuditLog(
+                user_id=user.id,
+                chat_id=chat_obj.id,
+                event="chat_answered",
+                source="api",
+                payload_json={
+                    "need_more_info": need_more_info,
+                    "questions_count": len(questions),
+                    "citations_count": len(citations),
+                    "mode": req.mode,
+                },
+            )
+        )
         session.flush()
 
         return ChatResponse(
             chat_id=chat_obj.id,
             answer=answer_text,
-            citations=result.get("citations", []),
+            citations=citations,
+            need_more_info=need_more_info,
+            questions=questions,
+            notes=[str(n).strip() for n in (result.get("notes") or []) if str(n).strip()],
             usage=result.get("usage", {}),
         )
 
