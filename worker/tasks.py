@@ -61,7 +61,6 @@ def _normalize_usage(raw: Any) -> dict[str, Any]:
         return raw
     return {}
 
-
 @shared_task(name="worker.tasks.answer_question")
 def answer_question(
     user_external_id: int | None,
@@ -150,3 +149,4 @@ def answer_question(
             "citations": citations,
             "usage": _normalize_usage(llm_out.get("usage") if llm_out else {}),
         }
+
