@@ -64,7 +64,7 @@ async def _render_ui(
     context: ContextTypes.DEFAULT_TYPE,
     *,
     text: str,
-    markup: InlineKeyboardMarkup,
+    markup: InlineKeyboardMarkup | None,
 ) -> None:
     await _ensure_ui_message(update, context)
     chat = update.effective_chat
@@ -79,7 +79,10 @@ async def _render_ui(
             text=text,
             reply_markup=markup,
         )
-    except BadRequest:
+    except BadRequest as e:
+        # не спамим новыми сообщениями, если контент тот же
+        if "Message is not modified" in str(e):
+            return
         msg = await context.bot.send_message(chat_id=chat.id, text=text, reply_markup=markup)
         context.user_data[UI_MSG_ID_KEY] = msg.message_id
 
@@ -191,7 +194,9 @@ async def _analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             update,
             context,
             text="Вже виконується аналіз. Зачекайте кілька секунд.",
-            markup=need_more_markup() if get_state(context.user_data) == "need_more_info" else case_markup(True),
+            markup=need_more_markup()
+            if get_state(context.user_data) == "need_more_info"
+            else case_markup(has_draft=True),
         )
         return
 
@@ -202,7 +207,7 @@ async def _analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     set_state(context.user_data, "analyzing")
     context.user_data[BUSY_KEY] = True
-    await _render_ui(update, context, text="⏳ Аналізую…", markup=InlineKeyboardMarkup([]))
+    await _render_ui(update, context, text="⏳ Аналізую…", markup=None)
 
     try:
         data = await asyncio.to_thread(
@@ -214,7 +219,7 @@ async def _analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception as exc:
         log.exception("Analyze failed")
         context.user_data[BUSY_KEY] = False
-        await _render_ui(update, context, text=f"Помилка API: {exc}", markup=case_markup(True))
+        await _render_ui(update, context, text=f"Помилка API: {exc}", markup=case_markup(has_draft=True))
         set_state(context.user_data, "awaiting_case")
         return
 

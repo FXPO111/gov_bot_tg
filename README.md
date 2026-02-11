@@ -91,6 +91,13 @@ Commands:
 
 `chat_id` from API response is persisted in Telegram `user_data`, so next user messages continue same chat context.
 
+
+### Conversation telemetry tables
+
+The DB now stores additional consultation telemetry:
+- `conversation_turns` — question/answer snapshots with `need_more_info` + clarification questions count
+- `audit_logs` — lightweight API events for diagnostics
+
 ## Useful diagnostics
 
 ```bash
