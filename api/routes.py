@@ -39,6 +39,10 @@ def health() -> HealthResponse:
 @router.post("/admin/init-db")
 def admin_init_db(x_admin_token: Optional[str] = Header(default=None)) -> dict[str, Any]:
     _admin_guard(x_admin_token)
+    try:
+        init_db()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"init-db failed: {exc}")
     init_db()
     return {"ok": True}
 
@@ -56,6 +60,8 @@ def admin_ingest(
         raise HTTPException(status_code=400, detail="Invalid URL")
 
     if sync:
+
+        from shared.ingest import ingest_url  # локальный импорт
         from shared.ingest import ingest_url  # локальный импорт, чтобы не тянуть зависимости на импорт модуля
 
         with get_session() as session:

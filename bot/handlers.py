@@ -13,6 +13,8 @@ TG_MSG_LIMIT = 3800
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop(CHAT_ID_KEY, None)
     await update.message.reply_text(
+        "Опишіть ситуацію: хто/коли/що сталося/суми/документи. "
+        "Я поставлю уточнювальні запитання та дам план дій із цитатами."
         "Опишіть ситуацію: хто/коли/що сталося/суми/документи.\n"
         "Надішліть питання — відповім за завантаженими джерелами з цитатами.\n"
         "Якщо база порожня — спочатку зробіть ingest через API адмінки."

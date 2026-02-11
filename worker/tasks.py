@@ -121,6 +121,7 @@ def _deduplicate_hits(hits: list[Any]) -> list[Any]:
     best_by_key: dict[tuple[str, str], Any] = {}
     order: list[tuple[str, str]] = []
 
+    for h in hits:
     for h in hits or []:
         key = _dedup_key(h)
         if key not in best_by_key:
