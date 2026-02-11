@@ -56,7 +56,7 @@ def admin_ingest(
         raise HTTPException(status_code=400, detail="Invalid URL")
 
     if sync:
-        from shared.ingest import ingest_url  # локальный импорт
+        from shared.ingest import ingest_url  # локальный импорт, чтобы не тянуть зависимости на импорт модуля
 
         with get_session() as session:
             r = ingest_url(session, url=url, title=req.title, meta=req.meta)
@@ -122,7 +122,9 @@ def chat(req: ChatRequest) -> ChatResponse:
             question,
             int(req.max_citations),
             float(req.temperature),
+            req.mode,
         )
+
         try:
             result = task.get(timeout=70)
         except Exception as e:
