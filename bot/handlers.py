@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
@@ -12,6 +14,8 @@ LAST_QUESTIONS_KEY = "last_questions"
 LAST_NEED_MORE_INFO_KEY = "last_need_more_info"
 LAST_TOPIC_KEY = "last_topic"
 TG_MSG_LIMIT = 3800
+
+log = logging.getLogger("bot.handlers")
 
 MAIN_PROMPT_TEXT = (
     "Опишіть, що сталося: хто, коли, де, суми, які документи є. "
@@ -233,73 +237,93 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _send_main_menu(update.message, "Поставте запитання своїми словами або скористайтесь меню нижче.")
 
 
+async def _reply_from_callback(query, text: str, reply_markup: InlineKeyboardMarkup | None = None) -> None:
+    target = query.message
+    if target is not None:
+        await target.reply_text(text, reply_markup=reply_markup)
+        return
+    await query.answer(text="Не вдалося відправити повідомлення. Спробуйте /start", show_alert=True)
+
+
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query:
         return
 
-    await query.answer()
     data = (query.data or "").strip()
 
-    if data == "m:menu":
-        await query.message.reply_text("Оберіть дію:", reply_markup=_main_menu_markup())
-        return
+    try:
+        await query.answer()
 
-    if data == "m:new":
-        _reset_context(context)
-        await query.message.reply_text("Ок, нове питання. Напишіть, що сталося.")
-        await query.message.reply_text("Оберіть дію:", reply_markup=_main_menu_markup())
-        return
-
-    if data == "m:template":
-        await query.message.reply_text(_template_text())
-        return
-
-    if data == "m:topics":
-        await query.message.reply_text("Оберіть тему-підказку:", reply_markup=_topics_markup())
-        return
-
-    if data == "m:sources_info":
-        await query.message.reply_text(_sources_info_text())
-        return
-
-    if data.startswith("t:"):
-        topic_key = data.split(":", 1)[1]
-        if topic_key not in TOPIC_HINTS:
-            await query.message.reply_text("Невідома тема. Спробуйте ще раз.")
+        if data == "m:menu":
+            await _reply_from_callback(query, "Оберіть дію:", reply_markup=_main_menu_markup())
             return
 
-        topic_name, hints = TOPIC_HINTS[topic_key]
-        context.user_data[LAST_TOPIC_KEY] = topic_name
+        if data == "m:new":
+            _reset_context(context)
+            await _reply_from_callback(query, "Ок, нове питання. Напишіть, що сталося.")
+            await _reply_from_callback(query, "Оберіть дію:", reply_markup=_main_menu_markup())
+            return
 
-        bullets = "\n".join(f"• {h}" for h in hints)
-        await query.message.reply_text(
-            f"Тема: {topic_name}.\nЩо бажано вказати:\n{bullets}\n\nПишіть далі вільним текстом.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="a:back")]]),
-        )
-        return
+        if data == "m:template":
+            await _reply_from_callback(query, _template_text())
+            return
 
-    if data == "a:back":
-        await query.message.reply_text("Оберіть дію:", reply_markup=_main_menu_markup())
-        return
+        if data == "m:topics":
+            await _reply_from_callback(query, "Оберіть тему-підказку:", reply_markup=_topics_markup())
+            return
 
-    if data == "a:sources":
-        citations = context.user_data.get(LAST_CITATIONS_KEY) or []
-        src = _format_sources(citations)
-        if src:
-            await query.message.reply_text(f"Джерела:\n\n{src}")
-        else:
-            await query.message.reply_text("Для останньої відповіді джерела відсутні.")
-        return
+        if data == "m:sources_info":
+            await _reply_from_callback(query, _sources_info_text())
+            return
 
-    if data == "a:questions":
-        questions = context.user_data.get(LAST_QUESTIONS_KEY) or []
-        formatted = _format_questions(questions)
-        if formatted:
-            await query.message.reply_text(f"Щоб відповісти точно, уточніть, будь ласка:\n{formatted}")
-        else:
-            await query.message.reply_text("Уточнення для останньої відповіді відсутні.")
-        return
+        if data.startswith("t:"):
+            topic_key = data.split(":", 1)[1]
+            if topic_key not in TOPIC_HINTS:
+                await _reply_from_callback(query, "Невідома тема. Спробуйте ще раз.")
+                return
+
+            topic_name, hints = TOPIC_HINTS[topic_key]
+            context.user_data[LAST_TOPIC_KEY] = topic_name
+
+            bullets = "\n".join(f"• {h}" for h in hints)
+            await _reply_from_callback(
+                query,
+                f"Тема: {topic_name}.\nЩо бажано вказати:\n{bullets}\n\nПишіть далі вільним текстом.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Назад", callback_data="a:back")]]),
+            )
+            return
+
+        if data == "a:back":
+            await _reply_from_callback(query, "Оберіть дію:", reply_markup=_main_menu_markup())
+            return
+
+        if data == "a:sources":
+            citations = context.user_data.get(LAST_CITATIONS_KEY) or []
+            src = _format_sources(citations)
+            if src:
+                await _reply_from_callback(query, f"Джерела:\n\n{src}")
+            else:
+                await _reply_from_callback(query, "Для останньої відповіді джерела відсутні.")
+            return
+
+        if data == "a:questions":
+            questions = context.user_data.get(LAST_QUESTIONS_KEY) or []
+            formatted = _format_questions(questions)
+            if formatted:
+                await _reply_from_callback(query, f"Щоб відповісти точно, уточніть, будь ласка:\n{formatted}")
+            else:
+                await _reply_from_callback(query, "Уточнення для останньої відповіді відсутні.")
+            return
+
+        await query.answer(text="Дія не розпізнана. Натисніть /start", show_alert=True)
+
+    except Exception:
+        log.exception("Failed to handle callback: %s", data)
+        try:
+            await query.answer(text="Сталася помилка. Спробуйте ще раз або /start", show_alert=True)
+        except Exception:
+            pass
 
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
