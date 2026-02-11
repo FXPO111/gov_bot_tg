@@ -76,7 +76,7 @@ curl -s -X POST localhost:8000/chat \
   }'
 ```
 
-Expected JSON fields: `answer`, `citations`, `chat_id`.
+Expected JSON fields: `answer`, `citations`, `chat_id`, `need_more_info`, `questions`.
 
 ## Telegram bot
 Bot starts automatically with compose if `TELEGRAM_BOT_TOKEN` is set.

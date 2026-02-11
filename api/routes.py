@@ -139,6 +139,9 @@ def chat(req: ChatRequest) -> ChatResponse:
             chat_id=chat_obj.id,
             answer=answer_text,
             citations=result.get("citations", []),
+            need_more_info=bool(result.get("need_more_info", False)),
+            questions=[str(q).strip() for q in (result.get("questions") or []) if str(q).strip()],
+            notes=[str(n).strip() for n in (result.get("notes") or []) if str(n).strip()],
             usage=result.get("usage", {}),
         )
 

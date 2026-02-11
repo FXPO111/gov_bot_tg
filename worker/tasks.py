@@ -167,6 +167,9 @@ def answer_question(
             return {
                 "answer": base_answer,
                 "citations": [],
+                "need_more_info": False,
+                "questions": [],
+                "notes": [],
                 "usage": {},
             }
 
@@ -242,5 +245,8 @@ def answer_question(
         return {
             "answer": answer_text,
             "citations": filtered,
+            "need_more_info": bool(llm_out.get("need_more_info", False)) if llm_out else False,
+            "questions": [str(q).strip() for q in (llm_out.get("questions") or []) if str(q).strip()] if llm_out else [],
+            "notes": [str(n).strip() for n in (llm_out.get("notes") or []) if str(n).strip()] if llm_out else [],
             "usage": _normalize_usage(llm_out.get("usage") if llm_out else {}),
         }
