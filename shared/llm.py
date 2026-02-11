@@ -1,3 +1,4 @@
+# shared/llm.py
 from __future__ import annotations
 
 import json
@@ -13,6 +14,9 @@ settings = get_settings()
 
 _client: Optional[OpenAI] = None
 _CIT_RE = re.compile(r"\[(\d{1,2})\]")
+
+_NEED_MORE_RE = re.compile(r"(?im)^\s*need_more_info\s*=\s*(true|false)\s*$")
+_SOURCES_BLOCK_RE = re.compile(r"(?is)(\n|^)(#+\s*)?(джерела|источники|sources)\s*:?.*$")
 
 
 def _is_openai_enabled() -> bool:
@@ -98,6 +102,13 @@ def _extract_citation_numbers(text: str) -> list[int]:
     return out
 
 
+def _sanitize_answer_markdown(answer_md: str) -> str:
+    answer_md = _NEED_MORE_RE.sub("", answer_md or "")
+    answer_md = _SOURCES_BLOCK_RE.sub("", answer_md)
+    answer_md = re.sub(r"\n{3,}", "\n\n", answer_md).strip()
+    return answer_md
+
+
 def _coerce_structured_payload(payload: Any, fallback_text: str) -> dict[str, Any]:
     obj: dict[str, Any]
     if isinstance(payload, str):
@@ -112,10 +123,7 @@ def _coerce_structured_payload(payload: Any, fallback_text: str) -> dict[str, An
         obj = {}
 
     answer_md = str(obj.get("answer_markdown") or fallback_text or "").strip()
-
-    # гарантируем, что "Источники/Джерела" не попадут в answer_markdown (их выводит внешний слой)
-    answer_md = re.sub(r"(?is)\n?#+\s*(Источники|Джерела)\b.*$", "", answer_md).strip()
-    answer_md = re.sub(r"(?is)\n?(Источники|Джерела)\s*:.*$", "", answer_md).strip()
+    answer_md = _sanitize_answer_markdown(answer_md)
 
     raw_used = obj.get("citations_used")
     used: list[int] = []
@@ -170,26 +178,27 @@ def answer_with_citations(
     ).strip()
 
     system = (
-        "Ты юридический консультант. Нельзя выдумывать факты и нормы. "
-        "Используй ТОЛЬКО предоставленный контекст и ссылки [n]. "
-        "Никогда не добавляй в answer_markdown раздел 'Источники'/'Джерела' — источники выводятся отдельно системой. "
-        "Если данных недостаточно, выстави need_more_info=true и задай уточняющие вопросы. "
-        "Формат ответа: Висновок, Норма, Що це означає на практиці, Ризики/обмеження, Що робити далі. "
-        "Если need_more_info=true, добавь Питання для уточнення. "
-        "Язык ответа должен совпадать с языком вопроса."
+        "Ти юридичний консультант з права України. "
+        "Відповідай СУВОРО українською мовою незалежно від мови запиту. "
+        "Не вигадуй фактів або норм, використовуй лише наданий контекст і цитати [n]. "
+        "Заборонено вставляти в answer_markdown службові маркери на кшталт need_more_info=true/false. "
+        "Заборонено додавати розділ 'Джерела/Источники/Sources' у answer_markdown. "
+        "Якщо даних недостатньо, встанови need_more_info=true та додай питання для уточнення в полі questions "
+        "(без службових рядків у markdown). "
+        "Структура answer_markdown: Висновок, Норма, Що це означає на практиці, Ризики/обмеження, Що робити далі; "
+        "за потреби — Питання для уточнення."
     )
 
-    style = "Консультационный, с планом действий и рисками." if mode == "consult" else "Короткий ответ по сути, но с цитатами."
+    style = "Консультаційний, з планом дій і ризиками." if mode == "consult" else "Короткий по суті, але з цитатами."
 
     user = (
-        f"Вопрос:\n{question}\n\n"
+        f"Питання:\n{question}\n\n"
         f"Режим: {mode}. Стиль: {style}\n\n"
-        f"История диалога:\n{history_text or '(пусто)'}\n\n"
-        f"Контекст (фрагменты):\n{chr(10).join(context_blocks)}\n\n"
-        f"Подсказка для цитирования:\n{citations_hint}\n"
+        f"Історія діалогу:\n{history_text or '(порожньо)'}\n\n"
+        f"Контекст (фрагменти):\n{chr(10).join(context_blocks)}\n\n"
+        f"Підказка для цитування:\n{citations_hint}\n"
     )
 
-    # Пытаемся требовать строгую структуру JSON (если модель/SDK поддерживает)
     try:
         resp = client.responses.create(
             model=settings.openai_model,

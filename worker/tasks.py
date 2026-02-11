@@ -1,5 +1,7 @@
+# worker/tasks.py
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Any, Dict, List
 from uuid import UUID
@@ -17,6 +19,7 @@ from shared.settings import get_settings
 
 settings = get_settings()
 _CIT_RE = re.compile(r"\[(\d{1,2})\]")
+_NEED_MORE_RE = re.compile(r"(?im)^\s*need_more_info\s*=\s*(true|false)\s*$")
 
 
 @shared_task(name="worker.tasks.init_db")
@@ -80,7 +83,8 @@ def _history_for_chat(session, chat_id: str, limit: int = 16) -> list[dict[str, 
         .limit(limit)
     ).all()
 
-    return [{"role": str(role), "content": str(content)} for role, content in reversed(rows)]
+    history = [{"role": str(role), "content": str(content)} for role, content in reversed(rows)]
+    return history
 
 
 def _extract_used_numbers(answer: str) -> list[int]:
@@ -99,6 +103,45 @@ def _filter_citations(citations: list[dict[str, Any]], used: list[int]) -> list[
     return [c for c in citations if int(c.get("n", 0)) in used_set]
 
 
+def _dedup_key(hit: Any) -> tuple[str, str]:
+    doc_id = str(getattr(hit, "document_id", "") or "")
+    chunk_id = str(getattr(hit, "chunk_id", "") or "")
+    if doc_id and chunk_id:
+        return ("id", f"{doc_id}:{chunk_id}")
+
+    url = (str(getattr(hit, "url", "") or "")).strip().lower()
+    loc = str(getattr(hit, "heading", "") or getattr(hit, "path", "") or "").strip().lower()
+    if url or loc:
+        return ("url_loc", f"{url}|{loc}")
+
+    text = (str(getattr(hit, "text", "") or "")).strip().lower()
+    return ("text", hashlib.sha1(text.encode("utf-8", errors="ignore")).hexdigest())
+
+
+def _deduplicate_hits(hits: list[Any]) -> list[Any]:
+    best_by_key: dict[tuple[str, str], Any] = {}
+    order: list[tuple[str, str]] = []
+
+    for h in hits or []:
+        key = _dedup_key(h)
+        if key not in best_by_key:
+            best_by_key[key] = h
+            order.append(key)
+            continue
+
+        prev = best_by_key[key]
+        prev_score = float(getattr(prev, "score", 0.0) or 0.0)
+        new_score = float(getattr(h, "score", 0.0) or 0.0)
+        if new_score > prev_score:
+            best_by_key[key] = h
+
+    return [best_by_key[k] for k in order]
+
+
+def _clean_service_markers(text: str) -> str:
+    return re.sub(_NEED_MORE_RE, "", text or "").strip()
+
+
 @shared_task(name="worker.tasks.answer_question")
 def answer_question(
     user_external_id: int | None,
@@ -114,12 +157,13 @@ def answer_question(
     with get_session() as session:
         history = _history_for_chat(session, chat_id=chat_id, limit=16)
         hits = retrieve(session, question, k=max_citations)
+        hits = _deduplicate_hits(hits)
 
         if not hits:
             base_answer = (
                 "Недостатньо релевантних джерел у базі для надійної консультації. "
-                "Будь ласка, догрузіть профільний НПА/роз'яснення за темою (URL на zakon.rada.gov.ua, kmu.gov.ua, "
-                "nbu.gov.ua тощо)."
+                "Будь ласка, додайте профільний НПА/роз'яснення за темою "
+                "(посилання на zakon.rada.gov.ua, kmu.gov.ua, nbu.gov.ua тощо)."
             )
             return {
                 "answer": base_answer,
@@ -133,7 +177,7 @@ def answer_question(
 
         for i, h in enumerate(hits, start=1):
             loc = _fmt_loc(h.path, h.heading)
-            loc_line = f"\nЛокация: {loc}" if loc else ""
+            loc_line = f"\nЛокація: {loc}" if loc else ""
 
             context_blocks.append(
                 f"[{i}] {h.title or 'Документ'}{loc_line}\nURL: {h.url or ''}\nФрагмент:\n{h.text}"
@@ -188,6 +232,8 @@ def answer_question(
                 "Не вдалося сформувати відповідь через LLM. Нижче — релевантні фрагменти для консультації:\n\n"
                 + "\n\n".join(preview)
             ).strip()
+
+        answer_text = _clean_service_markers(answer_text)
 
         if not used_numbers:
             used_numbers = _extract_used_numbers(answer_text)

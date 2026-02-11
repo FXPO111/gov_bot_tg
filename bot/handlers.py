@@ -1,3 +1,4 @@
+# bot/handlers.py
 from __future__ import annotations
 
 from telegram import Update
@@ -13,26 +14,26 @@ TG_MSG_LIMIT = 3800
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop(CHAT_ID_KEY, None)
     await update.message.reply_text(
-        "Опиши ситуацию: кто/когда/что произошло/суммы/документы.\n"
-        "Отправь вопрос — отвечу по загруженным источникам с цитатами.\n"
-        "Если база пустая — сначала сделай ingest через API админки."
+        "Опишіть ситуацію: хто/коли/що сталося/суми/документи.\n"
+        "Надішліть питання — відповім за завантаженими джерелами з цитатами.\n"
+        "Якщо база порожня — спочатку зробіть ingest через API адмінки."
     )
 
 
 async def cmd_newchat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop(CHAT_ID_KEY, None)
     await update.message.reply_text(
-        "Новый чат создан.\n"
-        "Контекст прошлой переписки очищен — задавай новый вопрос."
+        "Новий чат створено.\n"
+        "Контекст попереднього діалогу очищено — ставте нове запитання."
     )
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "/start — старт и сброс чата\n"
-        "/newchat — начать новый контекст\n"
-        "/help — справка\n"
-        "Просто отправь вопрос текстом."
+        "/start — старт і скидання контексту\n"
+        "/newchat — почати новий контекст\n"
+        "/help — довідка\n"
+        "Просто надішліть ваше запитання текстом."
     )
 
 
@@ -40,7 +41,7 @@ def _format_sources(citations: list[dict]) -> str:
     lines = []
     for c in citations[:6]:
         n = c.get("n")
-        title = c.get("title") or "Источник"
+        title = c.get("title") or "Джерело"
         url = c.get("url") or ""
         heading = c.get("heading") or c.get("path") or ""
 
@@ -95,20 +96,20 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             chat_id=chat_id,
         )
     except Exception as e:
-        await update.message.reply_text(f"API ошибка: {e}")
+        await update.message.reply_text(f"Помилка API: {e}")
         return
 
     resp_chat_id = data.get("chat_id")
     if resp_chat_id:
         context.user_data[CHAT_ID_KEY] = str(resp_chat_id)
 
-    answer = (data.get("answer") or "").strip() or "Пустой ответ от API."
+    answer = (data.get("answer") or "").strip() or "Порожня відповідь від API."
     citations = data.get("citations") or []
 
     out = answer
     src = _format_sources(citations)
     if src:
-        out = out + "\n\nИсточники:\n" + src
+        out = out + "\n\nДжерела:\n" + src
 
     for part in _split_for_telegram(out):
         await update.message.reply_text(part)
