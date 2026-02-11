@@ -4,11 +4,19 @@ import logging
 import time
 
 from telegram import Update
-from telegram.ext import ApplicationBuilder
-from telegram.ext import CallbackQueryHandler, CommandHandler, MessageHandler, filters
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from shared.settings import get_settings
-from .handlers import cmd_help, cmd_newchat, cmd_start, on_callback, on_text
+from .handlers import (
+    cmd_back,
+    cmd_cancel,
+    cmd_help,
+    cmd_menu,
+    cmd_newchat,
+    cmd_start,
+    on_callback,
+    on_text,
+)
 
 settings = get_settings()
 
@@ -35,6 +43,9 @@ def main() -> None:
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("menu", cmd_menu))
+    app.add_handler(CommandHandler("back", cmd_back))
+    app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CommandHandler("newchat", cmd_newchat))
     app.add_handler(CallbackQueryHandler(on_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))

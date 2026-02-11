@@ -83,7 +83,10 @@ Bot starts automatically with compose if `TELEGRAM_BOT_TOKEN` is set.
 
 Commands:
 - `/start` — reset context and intro
-- `/newchat` — reset chat context
+- `/menu` — main menu
+- `/back` — previous screen
+- `/cancel` — cancel current action
+- `/newchat` — start a new question
 - `/help` — help
 
 `chat_id` from API response is persisted in Telegram `user_data`, so next user messages continue same chat context.
