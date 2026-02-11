@@ -1,20 +1,30 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from telegram.ext import ApplicationBuilder
+from telegram.ext import CommandHandler, MessageHandler, filters
 
 from shared.settings import get_settings
-from .handlers import cmd_help, cmd_start, cmd_newchat, on_text
-from telegram.ext import CommandHandler, MessageHandler, filters
+from .handlers import cmd_help, cmd_newchat, cmd_start, on_text
 
 settings = get_settings()
 
 
+def _token_configured(token: str) -> bool:
+    t = (token or "").strip()
+    return bool(t and t.lower() not in {"your-telegram-bot-token", "change-me", "changeme"})
+
+
 def main() -> None:
     logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
-    if not settings.telegram_bot_token:
-        raise SystemExit("TELEGRAM_BOT_TOKEN is empty")
+    log = logging.getLogger("bot")
+
+    if not _token_configured(settings.telegram_bot_token):
+        log.warning("TELEGRAM_BOT_TOKEN is not configured. Bot stays idle.")
+        while True:
+            time.sleep(3600)
 
     app = ApplicationBuilder().token(settings.telegram_bot_token).build()
 
