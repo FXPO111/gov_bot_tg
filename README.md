@@ -76,17 +76,27 @@ curl -s -X POST localhost:8000/chat \
   }'
 ```
 
-Expected JSON fields: `answer`, `citations`, `chat_id`.
+Expected JSON fields: `answer`, `citations`, `chat_id`, `need_more_info`, `questions`.
 
 ## Telegram bot
 Bot starts automatically with compose if `TELEGRAM_BOT_TOKEN` is set.
 
 Commands:
 - `/start` — reset context and intro
-- `/newchat` — reset chat context
+- `/menu` — main menu
+- `/back` — previous screen
+- `/cancel` — cancel current action
+- `/newchat` — start a new question
 - `/help` — help
 
 `chat_id` from API response is persisted in Telegram `user_data`, so next user messages continue same chat context.
+
+
+### Conversation telemetry tables
+
+The DB now stores additional consultation telemetry:
+- `conversation_turns` — question/answer snapshots with `need_more_info` + clarification questions count
+- `audit_logs` — lightweight API events for diagnostics
 
 ## Useful diagnostics
 

@@ -5,7 +5,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Header, HTTPException, Query
 
 from shared.db import get_session, init_db
-from shared.models import Chat, Message, User
+from shared.models import AuditLog, Chat, ConversationTurn, Message, User
 from shared.schemas import (
     ChatRequest,
     ChatResponse,
@@ -133,12 +133,45 @@ def chat(req: ChatRequest) -> ChatResponse:
 
         answer_text = (result.get("answer") or "").strip()
         session.add(Message(chat_id=chat_obj.id, role="assistant", content=answer_text))
+
+        questions = [str(q).strip() for q in (result.get("questions") or []) if str(q).strip()]
+        need_more_info = bool(result.get("need_more_info", False))
+        citations = result.get("citations", [])
+
+        session.add(
+            ConversationTurn(
+                chat_id=chat_obj.id,
+                user_id=user.id,
+                question=question,
+                answer=answer_text,
+                need_more_info=need_more_info,
+                questions_json=questions,
+                citations_count=len(citations),
+            )
+        )
+        session.add(
+            AuditLog(
+                user_id=user.id,
+                chat_id=chat_obj.id,
+                event="chat_answered",
+                source="api",
+                payload_json={
+                    "need_more_info": need_more_info,
+                    "questions_count": len(questions),
+                    "citations_count": len(citations),
+                    "mode": req.mode,
+                },
+            )
+        )
         session.flush()
 
         return ChatResponse(
             chat_id=chat_obj.id,
             answer=answer_text,
-            citations=result.get("citations", []),
+            citations=citations,
+            need_more_info=need_more_info,
+            questions=questions,
+            notes=[str(n).strip() for n in (result.get("notes") or []) if str(n).strip()],
             usage=result.get("usage", {}),
         )
 
