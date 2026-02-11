@@ -63,6 +63,9 @@ class WorkerSerializationTests(unittest.TestCase):
             return_value={
                 "answer_markdown": "Висновок: див. [2]",
                 "citations_used": [2],
+                "need_more_info": True,
+                "questions": ["Уточніть дату договору"],
+                "notes": ["Враховано практику"],
                 "usage": FakeUsage(),
             },
         ):
@@ -80,6 +83,9 @@ class WorkerSerializationTests(unittest.TestCase):
         self.assertIsInstance(result["citations"][0]["document_id"], str)
         self.assertIsInstance(result["citations"][0]["chunk_id"], str)
         self.assertEqual(result["usage"]["total_tokens"], 19)
+        self.assertTrue(result["need_more_info"])
+        self.assertEqual(result["questions"], ["Уточніть дату договору"])
+        self.assertEqual(result["notes"], ["Враховано практику"])
 
         payload = json.dumps(result, ensure_ascii=False)
         self.assertIn("Висновок", payload)
@@ -120,6 +126,8 @@ class WorkerSerializationTests(unittest.TestCase):
             return_value={
                 "answer_markdown": "Висновок [1]",
                 "citations_used": [1],
+                "need_more_info": False,
+                "questions": [],
                 "usage": {},
             },
         ):
@@ -156,6 +164,8 @@ class WorkerSerializationTests(unittest.TestCase):
             return_value={
                 "answer_markdown": "Висновок\nneed_more_info=true\nНорма [1]",
                 "citations_used": [1],
+                "need_more_info": False,
+                "questions": [],
                 "usage": {},
             },
         ):
