@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.error import BadRequest
@@ -123,7 +122,7 @@ async def _send_reply(
     if chat is None:
         return
 
-    reply_to_message_id: Optional[int] = None
+    reply_to_message_id: int | None = None
     if reply_to:
         if update.message:
             reply_to_message_id = update.message.message_id
@@ -144,11 +143,33 @@ async def _send_reply(
 
 
 async def _ensure_ui_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if context.user_data.get(UI_MSG_ID_KEY):
-        return
     if update.effective_chat is None:
         return
-    msg = await context.bot.send_message(chat_id=update.effective_chat.id, text="Завантаження…")
+
+    current_ui_id = context.user_data.get(UI_MSG_ID_KEY)
+
+    # Якщо апдейт прийшов із нового користувацького/кнопочного повідомлення,
+    # прив'язуємо UI донизу чату, щоб не редагувати «старе» повідомлення зверху.
+    update_msg_id: int | None = None
+    if update.message:
+        update_msg_id = update.message.message_id
+    elif update.callback_query and update.callback_query.message:
+        update_msg_id = update.callback_query.message.message_id
+
+    must_reanchor = False
+    if not current_ui_id:
+        must_reanchor = True
+    elif update_msg_id is not None and int(current_ui_id) != int(update_msg_id):
+        must_reanchor = True
+
+    if not must_reanchor:
+        return
+
+    msg = await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="Завантаження…",
+        reply_to_message_id=update_msg_id,
+    )
     context.user_data[UI_MSG_ID_KEY] = msg.message_id
 
 
@@ -250,7 +271,6 @@ async def _go_sources_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def _go_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    # UI-экран можно оставить (если хочешь), но реальный ответ отправляем отдельными сообщениями в _analyze()
     set_state(context.user_data, "answer_ready")
     answer = trim_answer(str(context.user_data.get(LAST_ANSWER_KEY) or "Порожня відповідь."))
     citations = context.user_data.get(LAST_CITATIONS_KEY) or []
