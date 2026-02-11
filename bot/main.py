@@ -17,6 +17,10 @@ def _token_configured(token: str) -> bool:
     return bool(t and t.lower() not in {"your-telegram-bot-token", "change-me", "changeme"})
 
 
+def _on_error(update, context) -> None:
+    logging.getLogger("bot").exception("Unhandled bot error", exc_info=context.error)
+
+
 def main() -> None:
     logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
     log = logging.getLogger("bot")
@@ -33,6 +37,7 @@ def main() -> None:
     app.add_handler(CommandHandler("newchat", cmd_newchat))
     app.add_handler(CallbackQueryHandler(on_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+    app.add_error_handler(_on_error)
 
     app.run_polling(close_loop=False)
 

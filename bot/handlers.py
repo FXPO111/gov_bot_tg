@@ -239,10 +239,18 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def _reply_from_callback(query, text: str, reply_markup: InlineKeyboardMarkup | None = None) -> None:
     target = query.message
-    if target is not None:
-        await target.reply_text(text, reply_markup=reply_markup)
+    if target is None:
+        await query.answer(text="Не вдалося відправити повідомлення. Спробуйте /start", show_alert=True)
         return
-    await query.answer(text="Не вдалося відправити повідомлення. Спробуйте /start", show_alert=True)
+
+    # Спробувати “не спамити”: редагуємо те саме повідомлення, якщо можливо
+    try:
+        await target.edit_text(text, reply_markup=reply_markup)
+        return
+    except Exception:
+        pass
+
+    await target.reply_text(text, reply_markup=reply_markup)
 
 
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -251,6 +259,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     data = (query.data or "").strip()
+    user_id = update.effective_user.id if update.effective_user else None
+    log.info("callback received user_id=%s data=%s", user_id, data)
 
     try:
         await query.answer()
@@ -316,7 +326,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 await _reply_from_callback(query, "Уточнення для останньої відповіді відсутні.")
             return
 
-        await query.answer(text="Дія не розпізнана. Натисніть /start", show_alert=True)
+        await _reply_from_callback(query, "Дія не розпізнана. Натисніть /start")
 
     except Exception:
         log.exception("Failed to handle callback: %s", data)
@@ -333,6 +343,8 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = (update.message.text or "").strip()
     if not msg:
         return
+
+    log.info("text received user_id=%s len=%s", update.effective_user.id if update.effective_user else None, len(msg))
 
     chat_id = context.user_data.get(CHAT_ID_KEY)
 
