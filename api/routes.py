@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
@@ -34,13 +33,16 @@ def _admin_guard(x_admin_token: Optional[str]) -> None:
 
 @router.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    return HealthResponse(status="ok", time_utc=datetime.now(timezone.utc))
+    return HealthResponse(status="ok")
 
 
 @router.post("/admin/init-db")
 def admin_init_db(x_admin_token: Optional[str] = Header(default=None)) -> dict[str, Any]:
     _admin_guard(x_admin_token)
-    init_db()
+    try:
+        init_db()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"init-db failed: {exc}")
     return {"ok": True}
 
 
@@ -123,6 +125,7 @@ def chat(req: ChatRequest) -> ChatResponse:
             question,
             int(req.max_citations),
             float(req.temperature),
+            req.mode,
         )
         try:
             result = task.get(timeout=70)
