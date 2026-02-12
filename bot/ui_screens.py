@@ -4,6 +4,8 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 TG_MSG_LIMIT = 3800
 
+# Оставляем темы как НЕобязательный путь (для тех, кому проще выбрать категорию),
+# но основной UX — написать текст одним сообщением.
 TOPIC_HINTS: dict[str, tuple[str, list[str]]] = {
     "credit": (
         "Кредити/борги",
@@ -86,7 +88,7 @@ TOPIC_HINTS: dict[str, tuple[str, list[str]]] = {
 
 
 def main_menu_markup() -> InlineKeyboardMarkup:
-    # Для “аналогових”: минимум выбора, но с объяснениями.
+    # Для “аналогових”: минимум выбора + понятные объяснения.
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("📌 Як правильно написати", callback_data="main:template")],
@@ -103,7 +105,7 @@ def topics_markup() -> InlineKeyboardMarkup:
 
 
 def case_markup(has_draft: bool) -> InlineKeyboardMarkup:
-    # Ввод в основном идет текстом (auto-analyze), но оставляем минимальные кнопки.
+    # Ввод обычно идет текстом (auto-analyze), но оставляем минимальные кнопки.
     rows: list[list[InlineKeyboardButton]] = []
     if has_draft:
         rows.append([InlineKeyboardButton("✅ Аналізувати", callback_data="case:analyze")])
@@ -167,11 +169,20 @@ def format_sources(citations: list[dict]) -> str:
 
 
 def format_questions(questions: list[str]) -> str:
+    """
+    Важно: ограничение до 3 вопросов делаем НЕ здесь, а в handlers.py при рендере,
+    чтобы форматтер оставался универсальным.
+    """
     clean = [str(q).strip() for q in (questions or [])[:8] if str(q).strip()]
     return "\n".join(f"• {q}" for q in clean) if clean else ""
 
 
 def trim_answer_ex(text: str) -> tuple[str, bool]:
+    """
+    Обрезаем до 3000 символов, чтобы:
+    - оставить место под футер
+    - не упираться в TG_MSG_LIMIT (3800) при добавлении кнопок/подписей
+    """
     t = (text or "").strip()
     if len(t) <= 3000:
         return t, False

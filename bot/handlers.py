@@ -9,19 +9,16 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from .api_client import APIClient
-from .ui_nav import get_state, pop_screen, push_screen, reset_stack, set_state
+from .ui_nav import get_state, set_state
 from .ui_screens import (
     TG_MSG_LIMIT,
-    TOPIC_HINTS,
     answer_markup,
-    case_markup,
     format_questions,
     format_sources,
     main_menu_markup,
     need_more_markup,
     sources_markup,
     template_text,
-    topics_markup,
     trim_answer_ex,
 )
 
@@ -32,7 +29,6 @@ CHAT_ID_KEY = "chat_id"
 UI_MSG_ID_KEY = "ui_msg_id"
 LAST_CITATIONS_KEY = "last_citations"
 LAST_QUESTIONS_KEY = "last_questions"
-LAST_TOPIC_KEY = "last_topic"
 LAST_ANSWER_KEY = "last_answer"
 DRAFT_CASE_KEY = "draft_case"
 BUSY_KEY = "busy"
@@ -51,14 +47,20 @@ def _new_question_reset(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop(LAST_CITATIONS_KEY, None)
     context.user_data.pop(LAST_QUESTIONS_KEY, None)
     context.user_data.pop(LAST_ANSWER_KEY, None)
-    context.user_data.pop(LAST_TOPIC_KEY, None)
 
 
 def _help_text() -> str:
+    # Пояснення коротке, але достатнє навіть для “нецифрових”.
     return (
         "Юридичний консультант ВПО\n\n"
-        "Напишіть вашу ситуацію та питання одним повідомленням. "
-        "Якщо треба уточнити — просто надішліть додаткові деталі."
+        "Як написати запит, щоб відповідь була точною:\n"
+        "1) Що сталося (1–2 речення)\n"
+        "2) Коли і де\n"
+        "3) Хто учасники\n"
+        "4) Які документи/відповіді є\n"
+        "5) Що ви вже робили\n"
+        "6) Який результат вам потрібен\n\n"
+        "Пишіть одним повідомленням. Якщо треба уточнити — просто додайте деталі наступним повідомленням."
     )
 
 
@@ -122,10 +124,15 @@ async def _send_reply(
 
 
 async def _ensure_ui_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    UI-повідомлення — це “екран”, який ми редагуємо.
+    Якщо користувач пише нове повідомлення або тисне кнопку — “прив’язуємо” UI під цю дію.
+    """
     if update.effective_chat is None:
         return
 
     current_ui_id = context.user_data.get(UI_MSG_ID_KEY)
+
     update_msg_id: int | None = None
     if update.message:
         update_msg_id = update.message.message_id
@@ -143,7 +150,7 @@ async def _ensure_ui_message(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     msg = await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text="Завантаження…",
+        text="Готовий допомогти.",
         reply_to_message_id=update_msg_id,
     )
     context.user_data[UI_MSG_ID_KEY] = msg.message_id
@@ -177,6 +184,11 @@ async def _render_ui(
 
 
 async def _thinking_indicator(update: Update, context: ContextTypes.DEFAULT_TYPE) -> tuple[asyncio.Event, asyncio.Task]:
+    """
+    UX: показуємо, що бот думає:
+    - typing (анімація Telegram)
+    - текст “⏳ Думаю.” / “⏳ Думаю..” / “⏳ Думаю...”
+    """
     stop = asyncio.Event()
 
     async def _worker() -> None:
@@ -187,84 +199,54 @@ async def _thinking_indicator(update: Update, context: ContextTypes.DEFAULT_TYPE
             if chat is not None:
                 try:
                     await context.bot.send_chat_action(chat_id=chat.id, action=ChatAction.TYPING)
-                    await _render_ui(update, context, text=f"⏳ Думаю{dots[i % len(dots)]}", markup=None)
+                    await _render_ui(update, context, text=f"⏳ Думаю{dots[i % 3]}", markup=None)
                 except Exception:
-                    log.debug("thinking indicator update failed", exc_info=True)
+                    log.debug("thinking indicator error", exc_info=True)
             i += 1
             try:
                 await asyncio.wait_for(stop.wait(), timeout=2.5)
             except asyncio.TimeoutError:
-                continue
+                pass
 
-    task = asyncio.create_task(_worker())
-    return stop, task
+    return stop, asyncio.create_task(_worker())
 
 
-async def _go_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, *, push_current: bool = False) -> None:
-    current = get_state(context.user_data)
-    if push_current and current != "idle":
-        push_screen(context.user_data, current)
+async def _go_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     set_state(context.user_data, "idle")
-    reset_stack(context.user_data)
     text = (
         "Юридичний консультант ВПО\n\n"
         "Напишіть вашу ситуацію та питання одним повідомленням.\n"
-        "Приклад: Мені відмовили у виплаті ВПО, що робити далі?"
+        "Приклад: Мені відмовили у виплаті ВПО. Які кроки зробити зараз?\n\n"
+        "Якщо треба уточнити — просто напишіть додаткові деталі одним повідомленням."
     )
     await _render_ui(update, context, text=text, markup=main_menu_markup())
 
 
-async def _go_topics(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    current = get_state(context.user_data)
-    if current != "topic_select":
-        push_screen(context.user_data, current)
-    set_state(context.user_data, "topic_select")
-    await _render_ui(update, context, text="Оберіть тему:", markup=topics_markup())
-
-
-async def _go_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE, *, topic_key: str | None = None) -> None:
-    current = get_state(context.user_data)
-    if current != "awaiting_case":
-        push_screen(context.user_data, current)
-    set_state(context.user_data, "awaiting_case")
-
-    if topic_key and topic_key in TOPIC_HINTS:
-        context.user_data[LAST_TOPIC_KEY] = topic_key
-
-    draft = str(context.user_data.get(DRAFT_CASE_KEY) or "").strip()
-    topic_name, hints = TOPIC_HINTS.get(context.user_data.get(LAST_TOPIC_KEY), ("Інше", []))
-    hint_lines = "\n".join(f"• {h}" for h in hints[:3]) if hints else "• Опишіть, що саме сталося."
-    text = (
-        f"Тема: {topic_name}\n\n"
-        "Напишіть ситуацію і питання одним повідомленням.\n"
-        "Щоб було простіше, можна орієнтуватися на підказки:\n"
-        f"{hint_lines}"
-    )
-    await _render_ui(update, context, text=text, markup=case_markup(has_draft=bool(draft)))
-
-
 async def _go_template_hint(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    set_state(context.user_data, "template_hint")
     text = (
-        "Як написати питання (шаблон-підказка):\n\n"
+        "Як правильно написати (шаблон-підказка):\n\n"
         f"{template_text()}\n\n"
-        "Скопіюйте, заповніть і надішліть одним повідомленням. "
-        "Я одразу почну аналіз."
+        "Не обов’язково заповнювати все. Достатньо 2–4 пунктів.\n"
+        "Надішліть одним повідомленням — я одразу почну аналіз."
     )
     await _render_ui(update, context, text=text, markup=need_more_markup())
 
 
 async def _go_sources_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    set_state(context.user_data, "sources_info")
     text = (
         "Що таке «Джерела»:\n\n"
         "Це офіційні посилання на закони, постанови та державні сторінки, "
         "на які спирається відповідь.\n\n"
-        "Натисніть «📚 Джерела» під відповіддю, щоб відкрити список посилань."
+        "Після відповіді натисніть «📚 Джерела», щоб відкрити список посилань."
     )
     await _render_ui(update, context, text=text, markup=need_more_markup())
 
 
 async def _go_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     set_state(context.user_data, "answer_ready")
+
     answer_raw = str(context.user_data.get(LAST_ANSWER_KEY) or "Порожня відповідь.")
     answer_short, was_cut = trim_answer_ex(answer_raw)
     citations = context.user_data.get(LAST_CITATIONS_KEY) or []
@@ -285,8 +267,6 @@ async def _go_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 
 async def _go_sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if get_state(context.user_data) != "sources_view":
-        push_screen(context.user_data, get_state(context.user_data))
     set_state(context.user_data, "sources_view")
     src = format_sources(context.user_data.get(LAST_CITATIONS_KEY) or [])
     text = "Джерела (офіційні посилання). Натисніть на посилання, щоб відкрити документ.\n\n" + src
@@ -296,8 +276,11 @@ async def _go_sources(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def _go_need_more_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     set_state(context.user_data, "need_more_info")
     q = format_questions(context.user_data.get(LAST_QUESTIONS_KEY) or [])
+
+    # Для “аналогових”: максимум 3 уточнення, без перевантаження.
     lines = [line for line in q.splitlines() if line.strip()][:3]
     questions_text = "\n".join(lines)
+
     text = (
         "Щоб відповісти точно, уточніть, будь ласка:\n"
         + (questions_text or "• Додайте більше деталей.")
@@ -319,6 +302,7 @@ async def _analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     set_state(context.user_data, "analyzing")
     context.user_data[BUSY_KEY] = True
     context.user_data[FULL_SENT_KEY] = False
+
     await _ensure_ui_message(update, context)
     stop, task = await _thinking_indicator(update, context)
 
@@ -358,34 +342,8 @@ async def _analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await _go_answer(update, context)
 
 
-async def _go_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    prev = pop_screen(context.user_data)
-    if not prev:
-        await _go_menu(update, context)
-        return
-
-    screen = prev.get("screen")
-    if screen == "topic_select":
-        await _go_topics(update, context)
-    elif screen == "awaiting_case":
-        await _go_case_input(update, context)
-    elif screen == "answer_ready":
-        await _go_answer(update, context)
-    elif screen == "need_more_info":
-        await _go_need_more_info(update, context)
-    else:
-        await _go_menu(update, context)
-
-
-async def _cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    state = get_state(context.user_data)
-    if state in {"awaiting_case", "need_more_info", "analyzing"}:
-        _drop_draft(context)
-    await _go_menu(update, context)
-
-
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    _drop_draft(context)
+    _new_question_reset(context)
     await _go_menu(update, context)
 
 
@@ -394,11 +352,18 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def cmd_back(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _go_back(update, context)
+    # У спрощеному UX “назад” означає:
+    # - якщо в джерелах -> повернутись до відповіді
+    # - інакше -> меню
+    if get_state(context.user_data) == "sources_view":
+        await _go_answer(update, context)
+    else:
+        await _go_menu(update, context)
 
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _cancel(update, context)
+    _new_question_reset(context)
+    await _go_menu(update, context)
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -425,54 +390,34 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     await q.answer()
 
-    ns, action, _param = _parse_callback(q.data or "")
-    log.info("callback ns=%s action=%s state=%s", ns, action, get_state(context.user_data))
-
-    if ns == "nav":
-        if action == "menu":
-            await _go_menu(update, context)
-        elif action == "back":
-            await _go_back(update, context)
-        elif action == "cancel":
-            await _cancel(update, context)
-        return
+    ns, action, _ = _parse_callback(q.data or "")
 
     if ns == "main":
         if action == "help":
             await _send_reply(update, context, _help_text(), reply_to=False)
         elif action == "template":
             await _go_template_hint(update, context)
-        elif action == "topics":
-            await _go_topics(update, context)
         elif action == "newq":
             _new_question_reset(context)
             await _go_menu(update, context)
         elif action == "sources_info":
             await _go_sources_info(update, context)
-        return
-
-    if ns == "topic" and action in TOPIC_HINTS:
-        await _go_case_input(update, context, topic_key=action)
-        return
-
-    if ns == "case":
-        if action == "clear":
-            context.user_data[DRAFT_CASE_KEY] = ""
-            await _go_case_input(update, context)
-        elif action == "analyze":
-            await _analyze(update, context)
+        else:
+            await _go_menu(update, context)
         return
 
     if ns == "ans":
         if action == "sources":
             await _go_sources(update, context)
+        elif action == "back":
+            await _go_answer(update, context)
         elif action == "toggle_full":
             full_answer = str(context.user_data.get(LAST_ANSWER_KEY) or "").strip()
             await _send_reply(update, context, full_answer or "Порожня відповідь.", reply_to=False)
             context.user_data[FULL_SENT_KEY] = True
             await _go_answer(update, context)
-        elif action == "back":
-            await _go_answer(update, context)
+        else:
+            await _go_menu(update, context)
         return
 
     await _go_menu(update, context)
@@ -492,9 +437,10 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     state = get_state(context.user_data)
 
-    # Для "аналогових" користувачів: якщо вони просто пишуть після відповіді/меню —
-    # це нове питання, а не "дописати до старого".
-    if state in {"need_more_info", "awaiting_case", "analyzing"}:
+    # Поведінка для “аналогових”:
+    # - якщо бот просив уточнення -> це продовження (додаємо до чернетки)
+    # - інакше (меню/відповідь/джерела/підказки) -> це НОВЕ питання
+    if state in {"need_more_info", "analyzing"}:
         prev = str(context.user_data.get(DRAFT_CASE_KEY) or "").strip()
         context.user_data[DRAFT_CASE_KEY] = f"{prev}\n\n{msg}".strip() if prev else msg
     else:
