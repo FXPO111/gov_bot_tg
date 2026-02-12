@@ -64,14 +64,6 @@ TOPIC_HINTS: dict[str, tuple[str, list[str]]] = {
 }
 
 
-def nav_row() -> list[InlineKeyboardButton]:
-    return [
-        InlineKeyboardButton("◀️ Назад", callback_data="nav:back"),
-        InlineKeyboardButton("🏠 Меню", callback_data="nav:menu"),
-        InlineKeyboardButton("✖️ Скасувати", callback_data="nav:cancel"),
-    ]
-
-
 def main_menu_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
@@ -79,54 +71,42 @@ def main_menu_markup() -> InlineKeyboardMarkup:
             [InlineKeyboardButton("📌 Обрати тему", callback_data="main:topics")],
             [InlineKeyboardButton("🆕 Нове питання", callback_data="main:newq")],
             [InlineKeyboardButton("📚 Що таке «джерела»", callback_data="main:sources_info")],
-            nav_row(),
         ]
     )
 
 
 def topics_markup() -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(name, callback_data=f"topic:{key}")] for key, (name, _) in TOPIC_HINTS.items()]
-    rows.append(nav_row())
     return InlineKeyboardMarkup(rows)
 
 
 def case_markup(has_draft: bool) -> InlineKeyboardMarkup:
     rows = []
     if has_draft:
-        rows.append([InlineKeyboardButton("✅ Готово, аналізуй", callback_data="case:analyze")])
-    rows.append([InlineKeyboardButton("🧾 Вставити шаблон", callback_data="case:template")])
-    rows.append([InlineKeyboardButton("🗑 Очистити", callback_data="case:clear")])
-    rows.append(nav_row())
+        rows.append([InlineKeyboardButton("🗑 Очистити чернетку", callback_data="case:clear")])
+    rows.append([InlineKeyboardButton("🆕 Нове питання", callback_data="main:newq")])
     return InlineKeyboardMarkup(rows)
 
 
-def answer_markup(has_sources: bool, has_questions: bool) -> InlineKeyboardMarkup:
+def answer_markup(has_sources: bool, show_full_button: bool) -> InlineKeyboardMarkup:
     rows = []
-    if has_questions:
-        rows.append([InlineKeyboardButton("🔁 Уточнити", callback_data="ans:clarify")])
     if has_sources:
         rows.append([InlineKeyboardButton("📚 Джерела", callback_data="ans:sources")])
+    if show_full_button:
+        rows.append([InlineKeyboardButton("⬇️ Показати повністю", callback_data="ans:toggle_full")])
     rows.append([InlineKeyboardButton("🆕 Нове питання", callback_data="main:newq")])
-    rows.append([InlineKeyboardButton("🧩 Змінити тему", callback_data="main:topics")])
-    rows.append(nav_row())
     return InlineKeyboardMarkup(rows)
 
 
 def need_more_markup() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("✅ Продовжити аналіз", callback_data="clarify:analyze")],
-            [InlineKeyboardButton("🗑 Очистити", callback_data="case:clear")],
-            nav_row(),
-        ]
-    )
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🆕 Нове питання", callback_data="main:newq")]])
 
 
 def sources_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton("⬅️ До відповіді", callback_data="ans:back")],
-            nav_row(),
+            [InlineKeyboardButton("🆕 Нове питання", callback_data="main:newq")],
         ]
     )
 
@@ -164,8 +144,8 @@ def format_questions(questions: list[str]) -> str:
     return "\n".join(f"• {q}" for q in clean) if clean else ""
 
 
-def trim_answer(text: str) -> str:
+def trim_answer_ex(text: str) -> tuple[str, bool]:
     t = (text or "").strip()
     if len(t) <= 3000:
-        return t
-    return t[:3000].rstrip() + "\n\n… (скорочено для екрану)"
+        return t, False
+    return t[:3000].rstrip() + "\n\n…", True
