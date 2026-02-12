@@ -245,19 +245,20 @@ async def _go_case_input(update: Update, context: ContextTypes.DEFAULT_TYPE, *, 
 
 async def _go_template_hint(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (
-        "Шаблон-підказка (за бажанням):\n\n"
+        "Як написати питання (шаблон-підказка):\n\n"
         f"{template_text()}\n\n"
         "Скопіюйте, заповніть і надішліть одним повідомленням. "
-        "Бот одразу почне аналіз."
+        "Я одразу почну аналіз."
     )
     await _render_ui(update, context, text=text, markup=need_more_markup())
 
 
 async def _go_sources_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (
-        "Джерела (офіційні посилання). Натисніть на посилання, щоб відкрити документ.\n\n"
-        "Тут будуть закони, постанови та офіційні сторінки, "
-        "на які спирається відповідь."
+        "Що таке «Джерела»:\n\n"
+        "Це офіційні посилання на закони, постанови та державні сторінки, "
+        "на які спирається відповідь.\n\n"
+        "Натисніть «📚 Джерела» під відповіддю, щоб відкрити список посилань."
     )
     await _render_ui(update, context, text=text, markup=need_more_markup())
 
@@ -276,7 +277,10 @@ async def _go_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         update,
         context,
         text=f"Відповідь:\n\n{answer_short}{footer}",
-        markup=answer_markup(has_sources=bool(citations), show_full_button=was_cut and not context.user_data.get(FULL_SENT_KEY)),
+        markup=answer_markup(
+            has_sources=bool(citations),
+            show_full_button=was_cut and not context.user_data.get(FULL_SENT_KEY),
+        ),
     )
 
 
@@ -294,7 +298,11 @@ async def _go_need_more_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
     q = format_questions(context.user_data.get(LAST_QUESTIONS_KEY) or [])
     lines = [line for line in q.splitlines() if line.strip()][:3]
     questions_text = "\n".join(lines)
-    text = "Щоб відповісти точно, уточніть, будь ласка:\n" + (questions_text or "• Додайте більше деталей.")
+    text = (
+        "Щоб відповісти точно, уточніть, будь ласка:\n"
+        + (questions_text or "• Додайте більше деталей.")
+        + "\n\nВідповідайте одним повідомленням — я продовжу автоматично."
+    )
     await _render_ui(update, context, text=text, markup=need_more_markup())
 
 
@@ -450,7 +458,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if ns == "case":
         if action == "clear":
             context.user_data[DRAFT_CASE_KEY] = ""
-            await _go_menu(update, context)
+            await _go_case_input(update, context)
+        elif action == "analyze":
+            await _analyze(update, context)
         return
 
     if ns == "ans":
@@ -476,6 +486,19 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not msg:
         return
 
-    prev = str(context.user_data.get(DRAFT_CASE_KEY) or "").strip()
-    context.user_data[DRAFT_CASE_KEY] = f"{prev}\n\n{msg}".strip() if prev else msg
+    if context.user_data.get(BUSY_KEY):
+        await _send_reply(update, context, "⏳ Я ще думаю над попереднім повідомленням. Зачекайте...")
+        return
+
+    state = get_state(context.user_data)
+
+    # Для "аналогових" користувачів: якщо вони просто пишуть після відповіді/меню —
+    # це нове питання, а не "дописати до старого".
+    if state in {"need_more_info", "awaiting_case", "analyzing"}:
+        prev = str(context.user_data.get(DRAFT_CASE_KEY) or "").strip()
+        context.user_data[DRAFT_CASE_KEY] = f"{prev}\n\n{msg}".strip() if prev else msg
+    else:
+        _drop_draft(context)
+        context.user_data[DRAFT_CASE_KEY] = msg
+
     await _analyze(update, context)
