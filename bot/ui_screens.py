@@ -1,11 +1,16 @@
 from __future__ import annotations
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
 
 TG_MSG_LIMIT = 3800
 
-# Оставляем темы как НЕобязательный путь (для тех, кому проще выбрать категорию),
-# но основной UX — написать текст одним сообщением.
+# Теми — необовʼязковий шлях (для тих, кому простіше обрати категорію),
+# але основний UX — написати ситуацію текстом одним повідомленням.
 TOPIC_HINTS: dict[str, tuple[str, list[str]]] = {
     "credit": (
         "Кредити/борги",
@@ -57,9 +62,8 @@ TOPIC_HINTS: dict[str, tuple[str, list[str]]] = {
             "Про що спір: купівля, оренда, виселення, право власності?",
             "Адреса об’єкта та хто власник за документами?",
             "Які договори підписані та коли?",
-            "Чи були платежі/борги по комунальних?",
-            "Чи є реєстраційні документи, витяг, техпаспорт?",
-            "Чи є претензії або судові документи?",
+            "Чи були платежі/борги?",
+            "Які докази/документи на руках?",
         ],
     ),
     "inherit": (
@@ -69,8 +73,8 @@ TOPIC_HINTS: dict[str, tuple[str, list[str]]] = {
             "Яке майно входить у спадщину?",
             "Який ваш родинний зв’язок?",
             "Чи є заповіт?",
-            "Чи подавали заяву нотаріусу та коли?",
-            "Які документи підтвердження вже маєте?",
+            "Чи зверталися до нотаріуса і коли?",
+            "Які документи вже маєте?",
         ],
     ),
     "other": (
@@ -78,63 +82,79 @@ TOPIC_HINTS: dict[str, tuple[str, list[str]]] = {
         [
             "Коротко: що сталося і хто учасники?",
             "Коли та де це сталося?",
-            "Які суми або втрати важливі?",
+            "Які суми/втрати важливі?",
             "Які документи/докази вже є?",
-            "Що ви вже робили для вирішення?",
+            "Що ви вже робили?",
             "Який результат вам потрібен?",
         ],
     ),
 }
 
 
-def main_menu_markup() -> InlineKeyboardMarkup:
-    # Для “аналогових”: минимум выбора + понятные объяснения.
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("📌 Як правильно написати", callback_data="main:template")],
-            [InlineKeyboardButton("📚 Що таке «джерела»", callback_data="main:sources_info")],
-            [InlineKeyboardButton("📌 Обрати тему (необовʼязково)", callback_data="main:topics")],
-            [InlineKeyboardButton("🆕 Нове питання", callback_data="main:newq")],
-        ]
+# -----------------------------
+# Нижня панель (ReplyKeyboard)
+# -----------------------------
+
+def bottom_keyboard() -> ReplyKeyboardMarkup:
+    """
+    Постійні кнопки під полем вводу (ReplyKeyboard).
+    Це “нормальні кнопки знизу”.
+    """
+    rows = [
+        [KeyboardButton("🆕 Нова справа"), KeyboardButton("📋 Шаблон")],
+        [KeyboardButton("🧭 Теми"), KeyboardButton("ℹ️ Допомога")],
+    ]
+    return ReplyKeyboardMarkup(
+        rows,
+        resize_keyboard=True,
+        one_time_keyboard=False,
+        is_persistent=True,
+        input_field_placeholder="Опишіть ситуацію одним повідомленням…",
     )
 
 
-def topics_markup() -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(name, callback_data=f"topic:{key}")] for key, (name, _) in TOPIC_HINTS.items()]
-    return InlineKeyboardMarkup(rows)
+# -----------------------------
+# Inline кнопки під відповіддю
+# -----------------------------
 
-
-def case_markup(has_draft: bool) -> InlineKeyboardMarkup:
-    # Ввод обычно идет текстом (auto-analyze), но оставляем минимальные кнопки.
-    rows: list[list[InlineKeyboardButton]] = []
-    if has_draft:
-        rows.append([InlineKeyboardButton("✅ Аналізувати", callback_data="case:analyze")])
-        rows.append([InlineKeyboardButton("🗑 Очистити", callback_data="case:clear")])
-    rows.append([InlineKeyboardButton("🆕 Нове питання", callback_data="main:newq")])
-    return InlineKeyboardMarkup(rows)
-
-
-def answer_markup(has_sources: bool, show_full_button: bool) -> InlineKeyboardMarkup:
+def answer_inline_markup(has_sources: bool, show_full_button: bool) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     if has_sources:
         rows.append([InlineKeyboardButton("📚 Джерела", callback_data="ans:sources")])
     if show_full_button:
-        rows.append([InlineKeyboardButton("⬇️ Показати повністю", callback_data="ans:toggle_full")])
-    rows.append([InlineKeyboardButton("🆕 Нове питання", callback_data="main:newq")])
+        rows.append([InlineKeyboardButton("⬇️ Повністю", callback_data="ans:full")])
+    return InlineKeyboardMarkup(rows) if rows else InlineKeyboardMarkup([])
+
+
+def topics_markup() -> InlineKeyboardMarkup:
+    # Дві колонки + кнопка "Закрити"
+    keys = list(TOPIC_HINTS.keys())
+    rows: list[list[InlineKeyboardButton]] = []
+
+    i = 0
+    while i < len(keys):
+        k1 = keys[i]
+        b1 = InlineKeyboardButton(TOPIC_HINTS[k1][0], callback_data=f"topic:{k1}")
+        i += 1
+        if i < len(keys):
+            k2 = keys[i]
+            b2 = InlineKeyboardButton(TOPIC_HINTS[k2][0], callback_data=f"topic:{k2}")
+            rows.append([b1, b2])
+            i += 1
+        else:
+            rows.append([b1])
+
+    rows.append([InlineKeyboardButton("Закрити", callback_data="main:noop")])
     return InlineKeyboardMarkup(rows)
 
 
-def need_more_markup() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton("🆕 Нове питання", callback_data="main:newq")]])
-
-
-def sources_markup() -> InlineKeyboardMarkup:
-    # В источниках НЕЛЬЗЯ добавлять кнопку "Джерела" (иначе loop).
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("⬅️ До відповіді", callback_data="ans:back")],
-            [InlineKeyboardButton("🆕 Нове питання", callback_data="main:newq")],
-        ]
+def topic_hint_text(topic_key: str) -> str:
+    name, qs = TOPIC_HINTS.get(topic_key, ("Тема", []))
+    bullets = "\n".join(f"• {q}" for q in qs[:6])
+    return (
+        f"🧭 Тема: {name}\n\n"
+        "Надішліть одним повідомленням 2–4 відповіді по пунктах (або просто опишіть ситуацію):\n\n"
+        f"{bullets}"
     )
 
 
@@ -150,40 +170,58 @@ def template_text() -> str:
     )
 
 
-def format_sources(citations: list[dict]) -> str:
-    blocks: list[str] = []
-    for c in (citations or [])[:6]:
-        n = c.get("n")
-        title = c.get("title") or "Джерело"
-        heading = c.get("heading") or c.get("path") or ""
-        url = c.get("url") or ""
-
-        line = f"[{n}] {title}" if n is not None else title
-        if heading:
-            line += f" — {heading}"
-        if url:
-            line += f"\n{url}"
-        blocks.append(line)
-
-    return "\n\n".join(blocks) if blocks else "Джерела відсутні."
-
-
 def format_questions(questions: list[str]) -> str:
-    """
-    Важно: ограничение до 3 вопросов делаем НЕ здесь, а в handlers.py при рендере,
-    чтобы форматтер оставался универсальным.
-    """
     clean = [str(q).strip() for q in (questions or [])[:8] if str(q).strip()]
     return "\n".join(f"• {q}" for q in clean) if clean else ""
 
 
-def trim_answer_ex(text: str) -> tuple[str, bool]:
-    """
-    Обрезаем до 3000 символов, чтобы:
-    - оставить место под футер
-    - не упираться в TG_MSG_LIMIT (3800) при добавлении кнопок/подписей
-    """
+def trim_answer_ex(text: str, limit: int = 2800) -> tuple[str, bool]:
     t = (text or "").strip()
-    if len(t) <= 3000:
+    if len(t) <= limit:
         return t, False
-    return t[:3000].rstrip() + "\n\n…", True
+    return t[:limit].rstrip() + "\n\n…", True
+
+
+# -----------------------------
+# Backward-compatible wrappers
+# (щоб старі імпорти не падали)
+# -----------------------------
+
+def main_menu_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("🆕 Нова справа", callback_data="main:newq"),
+                InlineKeyboardButton("📋 Шаблон", callback_data="main:template"),
+            ],
+            [
+                InlineKeyboardButton("🧭 Теми", callback_data="main:topics"),
+                InlineKeyboardButton("ℹ️ Допомога", callback_data="main:help"),
+            ],
+        ]
+    )
+
+
+def need_more_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("🆕 Нова справа", callback_data="main:newq"),
+                InlineKeyboardButton("🧭 Теми", callback_data="main:topics"),
+            ],
+            [InlineKeyboardButton("ℹ️ Допомога", callback_data="main:help")],
+        ]
+    )
+
+
+def sources_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("📚 Джерела", callback_data="ans:sources")]])
+
+
+def answer_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("📚 Джерела", callback_data="ans:sources")],
+            [InlineKeyboardButton("⬇️ Повністю", callback_data="ans:full")],
+        ]
+    )
