@@ -61,13 +61,19 @@ CONTROL_THROTTLE_SEC = 0.4  # user попросил ~0.4 сек
 BTN_NEW = "🆕 Нова справа"
 BTN_TEMPLATE = "📋 Шаблон"
 BTN_TOPICS = "🧭 Теми"
+BTN_TOPICS_RU = "🧭 Темы"
 BTN_HELP = "ℹ️ Допомога"
 
 CONTROL_TEXTS = {
     BTN_NEW,
     BTN_TEMPLATE,
     BTN_TOPICS,
+    BTN_TOPICS_RU,
     BTN_HELP,
+    "Тема",
+    "Темы",
+    "тема",
+    "темы",
     "Нова справа",
     "Новая справа",
     "🆕 Новая справа",
@@ -270,7 +276,6 @@ async def _stop_status(update: Update, context: ContextTypes.DEFAULT_TYPE, *, de
 
 async def _status_loop(update: Update, context: ContextTypes.DEFAULT_TYPE, stop: asyncio.Event, msg_id: int) -> None:
     frames = [
-        "⏳ Аналізую запит",
         "⏳ Аналізую запит.",
         "⏳ Аналізую запит..",
         "⏳ Аналізую запит...",
@@ -312,9 +317,8 @@ async def _start_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     reply_to_message_id = update.message.message_id if update.message else None
     msg = await context.bot.send_message(
         chat_id=chat.id,
-        text="⏳ Аналізую запит",
+        text="⏳ Аналізую запит.",
         reply_to_message_id=reply_to_message_id,
-        reply_markup=bottom_keyboard(),
         disable_web_page_preview=True,
     )
     context.user_data[STATUS_MSG_ID_KEY] = msg.message_id
@@ -678,6 +682,14 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if action == "cancel":
             await cmd_cancel(update, context)
             return
+        if action == "noop":
+            if q.message:
+                try:
+                    await q.message.delete()
+                except Exception:
+                    pass
+            await _send_welcome(update, context)
+            return
         return
 
     if ns == "topic":
@@ -758,7 +770,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if msg == BTN_TEMPLATE:
             await _send_template(update, context)
             return
-        if msg == BTN_TOPICS:
+        if msg in {BTN_TOPICS, BTN_TOPICS_RU, "Тема", "Темы", "тема", "темы"}:
             await _send_topics(update, context)
             return
         if msg == BTN_HELP:
