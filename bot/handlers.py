@@ -690,7 +690,6 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     pass
             await _send_welcome(update, context)
             return
-        return
 
     if ns == "topic":
         chat = q.message.chat if q.message else update.effective_chat
