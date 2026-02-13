@@ -319,7 +319,6 @@ async def _start_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         chat_id=chat.id,
         text="⏳ Аналізую запит.",
         reply_to_message_id=reply_to_message_id,
-        reply_markup=bottom_keyboard(),
         disable_web_page_preview=True,
     )
     context.user_data[STATUS_MSG_ID_KEY] = msg.message_id
@@ -689,8 +688,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     await q.message.delete()
                 except Exception:
                     pass
+            await _send_welcome(update, context)
             return
-        return
 
     if ns == "topic":
         chat = q.message.chat if q.message else update.effective_chat
